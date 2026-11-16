@@ -5,7 +5,7 @@
 # (supply chain); a tag like 3.12-slim can be re-pointed upstream at any time.
 
 # --- Stage 1: builder ---------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -23,7 +23,7 @@ RUN /opt/venv/bin/pip install --require-hashes -r requirements.txt \
  && /opt/venv/bin/python -m pip uninstall -y pip
 
 # --- Stage 2: runtime ---------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.15-slim AS runtime
 
 # apt-get upgrade: official base images lag behind distro security fixes
 # (found by CI: zlib1g CVE-2026-85091 was fixed in Debian, but not yet in
