@@ -1,6 +1,6 @@
 # Direct runtime dependencies only. The lockfile (every transitive package
 # pinned + sha256-hashed) is generated for the CONTAINER's platform — Linux,
-# Python 3.12 — not for the Mac it is generated on:
+# Python 3.12 — not for the developer machine it is generated on:
 #   uv pip compile requirements.in --generate-hashes \
 #     --python-version 3.12 --python-platform linux -o requirements.txt
 #
