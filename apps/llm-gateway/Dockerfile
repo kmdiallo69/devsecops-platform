@@ -11,6 +11,7 @@ ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN python -m venv /opt/venv
+WORKDIR /build
 COPY requirements.txt .
 # --require-hashes: every package (including transitive ones) must match the
 # sha256 recorded in requirements.txt — a tampered or substituted package on
@@ -24,10 +25,17 @@ RUN /opt/venv/bin/pip install --require-hashes -r requirements.txt \
 # --- Stage 2: runtime ---------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
+# apt-get upgrade: official base images lag behind distro security fixes
+# (found by CI: zlib1g CVE-2026-85091 was fixed in Debian, but not yet in
+# python:3.12-slim). Patching at build time closes that gap; the apt lists
+# are deleted so they do not bloat the image.
 # pip is not needed at runtime: removing it means an attacker with code
 # execution cannot simply `pip install` their tooling, and it is one less
 # package for scanners to flag.
-RUN python -m pip uninstall -y pip \
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+ && python -m pip uninstall -y pip \
  && groupadd --gid 10001 app \
  && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app
 

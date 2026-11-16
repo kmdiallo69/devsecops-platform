@@ -1,0 +1,22 @@
+# Pinning everything (action SHAs, hashed Python lockfile, base image) only
+# stays safe if the pins are kept current — Dependabot opens the update PRs,
+# and the security CI gates them like any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /apps/llm-gateway
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /apps/llm-gateway
+    schedule:
+      interval: weekly
