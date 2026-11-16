@@ -16,7 +16,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 |---|------|----------------|--------|
 | 0 | Bootstrap: toolchain, repo hygiene, pre-commit secret scanning | Shift-left: secrets never reach Git | ✅ |
 | 1 | Demo app + LLM gateway (FastAPI), hardened Dockerfile | Secure-by-default containers | ✅ |
-| 2 | CI security gates (GitHub Actions): Gitleaks, Semgrep/Bandit (SAST), pip-audit + Trivy (SCA), Checkov (IaC), Hadolint | SAST / SCA / IaC / secret detection as merge gates | ⏳ |
+| 2 | CI security gates (GitHub Actions): Gitleaks, Semgrep (SAST), pip-audit (SCA), Checkov + Hadolint (IaC), Trivy (image) — required to merge | SAST / SCA / IaC / secret detection as merge gates | ✅ |
 | 3 | JFrog Artifactory: push via OIDC, immutable tags, remote-repo allow/deny, Xray | Artifact governance | ⏳ |
 | 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ⏳ |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ⏳ |
@@ -48,6 +48,25 @@ uv venv --python 3.12 --managed-python && source .venv/bin/activate
 uv pip install --require-hashes -r requirements-dev.txt
 python -m pytest -q
 ```
+
+## Security CI (`.github/workflows/security-ci.yml`)
+
+Six gates run in parallel on every PR; `main` is branch-protected, so a PR
+cannot merge unless all six pass. Findings from Semgrep and Checkov are
+uploaded as SARIF to the repository's Security tab.
+
+The pipeline itself is hardened: actions pinned to full commit SHAs
+(kept current by Dependabot), `permissions: {}` by default with per-job
+grants, `persist-credentials: false` on every checkout.
+
+**What the first CI run actually caught** (PR #1):
+
+| Finding | Gate | Fix |
+|---|---|---|
+| zlib1g heap overflow (CVE-2026-85091, HIGH) in `python:3.12-slim` — fixed in Debian, not yet in the official image | Trivy | `apt-get upgrade` at build time |
+| `COPY` without `WORKDIR` in the builder stage (DL3045) | Hadolint | explicit `WORKDIR /build` |
+| `checkov-action` pinned from its "latest release" — published in 2022, ran Checkov 2.0.930 | the pipeline itself | pin resolved from the newest **tag** |
+| Hadolint skipped because the Checkov step failed before it | the pipeline itself | `if: !cancelled()` — one gate never hides another |
 
 ## Quick start
 
