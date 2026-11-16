@@ -5,7 +5,13 @@ tap "hashicorp/tap"
 brew "hashicorp/tap/terraform"
 brew "checkov"           # IaC scanning (Terraform, Kubernetes, Dockerfile)
 
-# Containers & Kubernetes (kubectl, helm, kind, docker already installed)
+# Cloud, Git & Kubernetes — native arm64 builds (Intel builds under Rosetta
+# fail as soon as they call git/xcrun on Apple Silicon)
+brew "gh"
+cask "azure-cli"         # moved from homebrew/core to a cask
+brew "kubernetes-cli"    # kubectl
+brew "helm"
+brew "kind"
 brew "hadolint"          # Dockerfile linter
 
 # Supply chain
