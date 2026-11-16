@@ -1,21 +1,20 @@
 # Toolchain for the whole project — `brew bundle` installs what is missing.
 tap "hashicorp/tap"
 
-# IaC (Homebrew core is stuck at Terraform 1.5.7 since the BSL license change)
+# IaC
 brew "hashicorp/tap/terraform"
 brew "checkov"           # IaC scanning (Terraform, Kubernetes, Dockerfile)
 
-# Cloud, Git & Kubernetes — native arm64 builds (Intel builds under Rosetta
-# fail as soon as they call git/xcrun on Apple Silicon)
+# Cloud, Git & Kubernetes
 brew "gh"
-cask "azure-cli"         # moved from homebrew/core to a cask
+cask "azure-cli"
 brew "kubernetes-cli"    # kubectl
 brew "helm"
 brew "kind"
 brew "hadolint"          # Dockerfile linter
 
 # Python — uv locks dependencies for the container's platform (Linux,
-# Python 3.12) from a Mac, with hashes
+# Python 3.12) regardless of the developer's OS, with hashes
 brew "uv"
 
 # Supply chain
