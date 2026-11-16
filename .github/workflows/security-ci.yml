@@ -110,8 +110,11 @@ jobs:
           persist-credentials: false
       # Scans everything it recognises: Dockerfiles and GitHub workflows
       # today, Kubernetes manifests (Step 5) and Terraform (Step 7) later.
+      # Pin found by listing TAGS, not "latest release": this repo's last
+      # GitHub release is from 2022 (v12.1347.0 = Checkov 2.0.930) — pinning
+      # that SHA silently ran a 4-year-old scanner.
       - name: Checkov
-        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        uses: bridgecrewio/checkov-action@3f0caf0c3aa9f56ade6b49f6e60b63aaeafb75a3 # v12.3141.0
         with:
           directory: .
           quiet: true
@@ -123,7 +126,10 @@ jobs:
         with:
           sarif_file: checkov.sarif
           category: checkov
+      # Runs even if Checkov failed: one gate failing must not hide another
+      # gate's findings (first CI run: Checkov errored and Hadolint was skipped).
       - name: Hadolint
+        if: ${{ !cancelled() }}
         uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
         with:
           dockerfile: ${{ env.APP_DIR }}/Dockerfile
