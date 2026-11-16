@@ -14,6 +14,10 @@ brew "helm"
 brew "kind"
 brew "hadolint"          # Dockerfile linter
 
+# Python — uv locks dependencies for the container's platform (Linux,
+# Python 3.12) from a Mac, with hashes
+brew "uv"
+
 # Supply chain
 brew "trivy"             # SCA + image + misconfig scanning
 brew "syft"              # SBOM generation

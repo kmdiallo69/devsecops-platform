@@ -1,0 +1,12 @@
+# Direct runtime dependencies only. The lockfile (every transitive package
+# pinned + sha256-hashed) is generated for the CONTAINER's platform — Linux,
+# Python 3.12 — not for the Mac it is generated on:
+#   uv pip compile requirements.in --generate-hashes \
+#     --python-version 3.12 --python-platform linux -o requirements.txt
+#
+# uvicorn WITHOUT [standard]: the extras (uvloop, httptools, watchfiles,
+# websockets...) are not needed here — every package left out is one less
+# thing to patch.
+fastapi==0.163.1
+uvicorn==0.54.0
+httpx==0.28.1

@@ -1,0 +1,6 @@
+# Allow-list style: ignore everything, then add back only what the image
+# needs — a stray .env or test fixture can never end up in the image.
+*
+!app/
+!requirements.txt
+**/__pycache__
