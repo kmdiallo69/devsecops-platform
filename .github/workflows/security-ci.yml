@@ -1,0 +1,172 @@
+# =============================================================================
+# Security CI — every PR must pass these gates before it can be merged
+# =============================================================================
+# Gate            Tool              Catches
+# --------------  ----------------  -------------------------------------------
+# secrets         Gitleaks          credentials committed anywhere in history
+# sast            Semgrep           insecure code patterns (OWASP Top 10)
+# sca             pip-audit         known CVEs in Python dependencies
+# iac             Checkov, Hadolint misconfigured Dockerfile/K8s/Terraform/CI
+# tests           pytest            security behaviour regressions (Step 1)
+# image           Trivy             CVEs in the built image (OS + libraries)
+#
+# The pipeline is itself an attack target (it holds credentials and produces
+# what runs in production), so it is hardened too:
+#   - every third-party action pinned to a full commit SHA: a tag like @v4
+#     can be moved by whoever controls that repo (tj-actions/changed-files,
+#     March 2025, leaked secrets from thousands of pipelines that way).
+#     Dependabot (.github/dependabot.yml) keeps the SHAs up to date.
+#   - `permissions: {}` at the top: the GITHUB_TOKEN starts with NO rights,
+#     each job is granted only what it needs.
+#   - `persist-credentials: false`: the checkout token is not left on disk
+#     for later steps (or a compromised tool) to reuse.
+#
+# No `paths:` filter: a required check that never runs (because the PR
+# touched no matching path) leaves the PR blocked on "Expected — waiting".
+
+name: security-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_DIR: apps/llm-gateway
+
+jobs:
+  secrets:
+    name: Secrets (Gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history: a secret deleted in a later commit is still leaked
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Free for personal accounts; a GitHub *organization* needs a
+          # (free) GITLEAKS_LICENSE secret — or run the gitleaks CLI directly.
+          GITLEAKS_ENABLE_COMMENTS: "false" # would need pull-requests: write
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF to the repo's Security tab
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: Semgrep
+        run: >
+          uvx semgrep==1.185.0 scan
+          --config p/python --config p/owasp-top-ten --config p/dockerfile
+          --metrics=off --error
+          --sarif-output=semgrep.sarif
+          apps/
+      - name: Upload findings to the Security tab
+        if: always() # findings must be visible precisely when the gate fails
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  sca:
+    name: SCA (pip-audit)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      # --disable-pip: audits the hashed lockfile as-is, nothing is installed
+      - name: pip-audit
+        run: uvx pip-audit==2.10.1 -r "$APP_DIR/requirements.txt" --require-hashes --disable-pip
+
+  iac:
+    name: IaC & Dockerfile (Checkov, Hadolint)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Scans everything it recognises: Dockerfiles and GitHub workflows
+      # today, Kubernetes manifests (Step 5) and Terraform (Step 7) later.
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@99bb2caf247dfd9f03cf984373bc6043d4e32ebf # v12.1347.0
+        with:
+          directory: .
+          quiet: true
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+      - name: Upload Checkov findings
+        if: always()
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+      - name: Hadolint
+        uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: ${{ env.APP_DIR }}/Dockerfile
+          failure-threshold: warning
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ env.APP_DIR }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - run: uv venv --python 3.12
+      - run: uv pip install --require-hashes -r requirements-dev.txt
+      - run: .venv/bin/python -m pytest -v
+
+  image:
+    name: Image scan (Trivy)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # --pull: always start from the CURRENT base image, never a stale
+      # cached one — otherwise a fixed base CVE would keep failing (or a
+      # new one would go unnoticed).
+      - name: Build
+        run: docker build --pull -t "llm-gateway:${GITHUB_SHA}" "$APP_DIR"
+      # ignore-unfixed: a CVE with no available fix cannot be acted on by
+      # this PR — it is tracked, not used to block every merge.
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: llm-gateway:${{ github.sha }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
