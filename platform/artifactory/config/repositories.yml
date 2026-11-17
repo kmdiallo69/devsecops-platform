@@ -1,0 +1,72 @@
+# =============================================================================
+# Artifactory repositories — configuration as code
+# =============================================================================
+# Applied with ../apply-config.sh (YAML configuration PATCH API). The patch
+# is a merge: re-applying the same file is a no-op, and a repository is only
+# removed by setting its key to `~` explicitly — nothing disappears by
+# accident.
+#
+#                     ┌──────────────── docker (virtual) ─────────────────┐
+#   docker pull ────▶ │ images-local    ghcr-remote       dockerhub-remote│
+#                     └──────┬───────────────┬───────────────────┬────────┘
+#                   immutable tags,   only kmdiallo69/**   only allowlisted
+#                   no overwrite      from ghcr.io         base images
+
+localRepositories:
+  # Internal images. Immutability comes from permissions: the publisher
+  # identity gets "Deploy/Cache" but NOT "Delete/Overwrite", so pushing an
+  # existing tag again is refused. Enforced per FILE, not per tag: pushing
+  # the other manifest format (index vs single image) to an existing tag is
+  # accepted — so deployments pin digests and verify signatures (SETUP.md §6).
+  images-local:
+    type: docker
+    description: "Internal images - immutable tags"
+    dockerApiVersion: V2
+    repoLayout: simple-default
+    # Docker token auth (Bearer flow): off by default in the YAML API,
+    # unlike the UI — without it Docker Hub/GHCR pulls fail with 401/404.
+    enableTokenAuthentication: true
+    maxUniqueTags: 0
+
+  # Default demo repository created by the installer: unused, so removed
+  # (explicit `~` — the only way this patch ever deletes anything).
+  example-repo-local: ~
+
+remoteRepositories:
+  # Proxy of GHCR restricted to our own namespace: CI pushes signed images
+  # to GHCR; consumers pull them through here, never from ghcr.io directly.
+  ghcr-remote:
+    type: docker
+    description: "ghcr.io - only kmdiallo69/** allowed"
+    url: https://ghcr.io
+    repoLayout: simple-default
+    enableTokenAuthentication: true
+    includesPattern: "kmdiallo69/**"
+    blockPushingSchema1: true
+    retrievalCachePeriodSecs: 600
+
+  # Proxy of Docker Hub with an ALLOWLIST: a typo-squatted or unvetted image
+  # ("pyhton", "someuser/python") is refused at the registry, before anyone
+  # can build on it or deploy it.
+  dockerhub-remote:
+    type: docker
+    description: "Docker Hub - allowlisted base images only"
+    url: https://registry-1.docker.io
+    repoLayout: simple-default
+    enableTokenAuthentication: true
+    includesPattern: "library/python/**"
+    blockPushingSchema1: true
+    retrievalCachePeriodSecs: 600
+
+virtualRepositories:
+  # Single endpoint for consumers: developers, CI, Kubernetes.
+  docker:
+    type: docker
+    description: "Single pull endpoint - internal + approved upstream images"
+    repoLayout: simple-default
+    enableTokenAuthentication: true
+    repositories:
+      - images-local
+      - ghcr-remote
+      - dockerhub-remote
+    defaultDeploymentRepo: images-local

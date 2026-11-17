@@ -17,7 +17,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 0 | Bootstrap: toolchain, repo hygiene, pre-commit secret scanning | Shift-left: secrets never reach Git | ✅ |
 | 1 | Demo app + LLM gateway (FastAPI), hardened Dockerfile | Secure-by-default containers | ✅ |
 | 2 | CI security gates (GitHub Actions): Gitleaks, Semgrep (SAST), pip-audit (SCA), Checkov + Hadolint (IaC), Trivy (image) — required to merge | SAST / SCA / IaC / secret detection as merge gates | ✅ |
-| 3 | JFrog Artifactory: push via OIDC, immutable tags, remote-repo allow/deny, Xray | Artifact governance | ⏳ |
+| 3 | JFrog Artifactory (self-hosted JCR): single entry point, remote-repo allowlists, immutable tags, least-privilege identities | Artifact governance | ✅ |
 | 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ⏳ |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ⏳ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ⏳ |
@@ -67,6 +67,47 @@ grants, `persist-credentials: false` on every checkout.
 | `COPY` without `WORKDIR` in the builder stage (DL3045) | Hadolint | explicit `WORKDIR /build` |
 | `checkov-action` pinned from its "latest release" — published in 2022, ran Checkov 2.0.930 | the pipeline itself | pin resolved from the newest **tag** |
 | Hadolint skipped because the Checkov step failed before it | the pipeline itself | `if: !cancelled()` — one gate never hides another |
+
+## Artifact governance — JFrog Artifactory (`platform/artifactory`)
+
+Self-hosted JFrog Container Registry (JCR) + PostgreSQL, behind an nginx
+proxy. Artifactory is the **single trusted entry point** for images:
+nothing is pulled from Docker Hub or GHCR directly.
+
+```
+CI ──build, scan, sign──▶ GHCR                Docker Hub
+                           │                      │
+                     ghcr-remote            dockerhub-remote
+                  (only kmdiallo69/**)   (only library/python/**)
+                           └──────┬───────────────┘
+                     docker (virtual) ◀── images-local (immutable tags)
+                                  │
+                       developers · CI · Kubernetes
+```
+
+| Control | How |
+|---|---|
+| Allowlisted upstreams | `includesPattern` on remote repos — `nginx`, `someuser/python` are refused |
+| Immutable tags | publisher has *Deploy/Cache* but not *Delete/Overwrite* on `images-local` — see the limit below |
+| Least privilege | `publisher` (push to `images-local` only), `cluster-reader` (read only); no UI access for either; anonymous access disabled; installer default "Read on everything" permission removed |
+| Config as code | repositories in `config/repositories.yml`, applied with `apply-config.sh` (idempotent merge) |
+| No secrets in Git | admin token and passwords read from the OS keychain; DB password in a git-ignored `.env` |
+| Network exposure | every port bound to `127.0.0.1`; PostgreSQL not published at all |
+
+**What testing the controls actually found** (every control is proven with
+real `docker` commands, [`SETUP.md` §6](platform/artifactory/SETUP.md)):
+
+| Finding | Impact | Fix |
+|---|---|---|
+| Installer default permission `Anything` grants **Read on every repository** to the `readers` group, which every new user joins automatically | least privilege silently broken | permission deleted, auto-join disabled |
+| "No Delete/Overwrite" is enforced per **file**: an index is stored as `list.manifest.json`, a single image as `manifest.json` — pushing the other format to an existing tag was **accepted** | tag immutability bypassable by the publisher | one manifest format, always; same-format overwrite proven refused (`needs DELETE permission`); real guarantee moved to **deploy by digest + signature verification at admission** (steps 4–5) |
+| Passwords pasted into the UI were silently altered (partial selection of base64, browser autofill) | `Bad Credentials` for machine identities | passwords generated into the keychain, copied with `pbcopy`, verified by an API check before use |
+
+**Edition limit, stated plainly:** JCR (the free edition) exposes the
+repository configuration API but not the user/permission APIs (Pro only), so
+the two identities and their permissions are created in the UI, following
+the exact steps in [`platform/artifactory/SETUP.md`](platform/artifactory/SETUP.md).
+With Artifactory Pro, those would be Terraform (`jfrog/platform` provider).
 
 ## Quick start
 
