@@ -18,7 +18,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 1 | Demo app + LLM gateway (FastAPI), hardened Dockerfile | Secure-by-default containers | ✅ |
 | 2 | CI security gates (GitHub Actions): Gitleaks, Semgrep (SAST), pip-audit (SCA), Checkov + Hadolint (IaC), Trivy (image) — required to merge | SAST / SCA / IaC / secret detection as merge gates | ✅ |
 | 3 | JFrog Artifactory (self-hosted JCR): single entry point, remote-repo allowlists, immutable tags, least-privilege identities | Artifact governance | ✅ |
-| 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ⏳ |
+| 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | 🚧 |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ⏳ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ⏳ |
 | 7 | Azure with Terraform: AKS (private, Workload Identity, Azure Policy add-on), Key Vault (CMK, rotation), Log Analytics — scanned by Checkov | Governed cloud foundation, key management | ⏳ |
