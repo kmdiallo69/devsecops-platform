@@ -1,0 +1,76 @@
+# Zero trust inside the namespace: nothing talks to anything unless a
+# policy below allows it explicitly.
+#
+#   client pod (label llm-gateway-client=true) ──8000──▶ llm-gateway
+#   every pod ──53──▶ kube-dns
+#   llm-gateway ──✗──▶ internet   (an LLM gateway that can reach anywhere
+#                                  is an exfiltration / SSRF channel; the
+#                                  model endpoint gets its own rule later)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: llm-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: llm-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-ingress-from-clients
+  namespace: llm-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: llm-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              llm-gateway-client: "true"
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clients-egress-to-gateway
+  namespace: llm-gateway
+spec:
+  podSelector:
+    matchLabels:
+      llm-gateway-client: "true"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: llm-gateway
+      ports:
+        - protocol: TCP
+          port: 8000
