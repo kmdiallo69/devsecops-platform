@@ -1,0 +1,19 @@
+# Namespaces Gatekeeper does not police: the control plane and the
+# admission controllers themselves (fail-closed webhooks would otherwise
+# block their own restart). Their images come from upstream registries —
+# in production they would be mirrored through Artifactory too.
+apiVersion: config.gatekeeper.sh/v1alpha1
+kind: Config
+metadata:
+  name: config
+  namespace: gatekeeper-system
+spec:
+  match:
+    - excludedNamespaces:
+        - kube-system
+        - kube-public
+        - kube-node-lease
+        - local-path-storage
+        - gatekeeper-system
+        - kyverno
+      processes: ["*"]

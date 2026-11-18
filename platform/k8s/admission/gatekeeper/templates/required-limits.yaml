@@ -1,0 +1,25 @@
+# Every container must declare CPU and memory limits: without them, one
+# compromised or runaway pod (or an LLM request flood) starves the node.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlimits
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLimits
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlimits
+
+        containers[c] { c := input.review.object.spec.containers[_] }
+        containers[c] { c := input.review.object.spec.initContainers[_] }
+
+        violation[{"msg": msg}] {
+          c := containers[_]
+          resource := ["cpu", "memory"][_]
+          not c.resources.limits[resource]
+          msg := sprintf("container <%v> has no %v limit", [c.name, resource])
+        }

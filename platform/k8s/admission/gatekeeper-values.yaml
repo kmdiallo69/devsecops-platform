@@ -1,0 +1,47 @@
+# OPA Gatekeeper — chart values (pinned chart version in install.sh).
+
+# The chart default is `Ignore`: if Gatekeeper is down, slow or crashing,
+# the API server admits EVERY pod without checking it. Fail closed instead:
+# no decision, no pod. Gatekeeper's own namespace is exempt (otherwise it
+# could never restart itself), as are the other system namespaces below.
+validatingWebhookFailurePolicy: Fail
+validatingWebhookTimeoutSeconds: 5
+
+# ...but fail-closed is only safe with a SMALL blast radius. Found the hard
+# way: by default the webhook intercepts every resource in every namespace.
+# While its pod was starting, kube-controller-manager could not renew its
+# Lease (kube-system) -> lost leadership -> stopped marking endpoints ready
+# -> the webhook's own Service never got a ready endpoint -> deadlock: the
+# cluster refused every write. Two fences:
+#
+# 1. The API server does not even CALL the webhook for system namespaces
+#    (the Config exclusion only skips evaluation, the call still happens).
+validatingWebhookExemptNamespacesLabels:
+  kubernetes.io/metadata.name:
+    - kube-system
+    - kube-public
+    - kube-node-lease
+    - local-path-storage
+    - gatekeeper-system
+    - kyverno
+# 2. Only the resources the policies actually cover go through it: leases,
+#    endpoints, events... never wait on Gatekeeper.
+validatingWebhookCustomRules:
+  - apiGroups: [""]
+    apiVersions: ["*"]
+    operations: [CREATE, UPDATE]
+    resources: [pods, pods/ephemeralcontainers, namespaces]
+
+# Every denial is logged: the audit trail of who tried to run what.
+logDenies: true
+emitAdmissionEvents: true
+
+# Validation only: this repo uses Gatekeeper to refuse, never to silently
+# "fix" a workload (a rewritten pod is not the pod that was reviewed).
+disableMutation: true
+
+# Not used (signatures are verified by Kyverno), so not exposed.
+enableExternalData: false
+
+# Single-node local cluster: one replica each is enough.
+replicas: 1

@@ -19,7 +19,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 2 | CI security gates (GitHub Actions): Gitleaks, Semgrep (SAST), pip-audit (SCA), Checkov + Hadolint (IaC), Trivy (image) — required to merge | SAST / SCA / IaC / secret detection as merge gates | ✅ |
 | 3 | JFrog Artifactory (self-hosted JCR): single entry point, remote-repo allowlists, immutable tags, least-privilege identities | Artifact governance | ✅ |
 | 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ✅ |
-| 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | 🚧 |
+| 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ✅ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ⏳ |
 | 7 | Azure with Terraform: AKS (private, Workload Identity, Azure Policy add-on), Key Vault (CMK, rotation), Log Analytics — scanned by Checkov | Governed cloud foundation, key management | ⏳ |
 | 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity | No secret in Git or in images | ⏳ |
@@ -152,6 +152,54 @@ scripts/verify-release.sh 127.0.0.1:8085/docker/kmdiallo69/llm-gateway@sha256:<d
 deprecated. It is kept deliberately because it is what works through the
 registry proxy today; the switch back to OCI referrers is a one-line change
 (`COSIGN_FORMAT` in the workflow) once the proxy serves them.
+
+## Policy enforcement — kind cluster (`platform/kind`, `platform/k8s`)
+
+A local cluster that **only runs what the pipeline signed**. Nodes pull
+exclusively through Artifactory (`registry.local:8085`, read-only
+`cluster-reader` identity); three admission layers decide what may run:
+
+| Layer | Rules | Why this tool |
+|---|---|---|
+| **Pod Security Admission** (`restricted`, enforced) | no privileged, no root, no capabilities, no privilege escalation, seccomp required | built into the API server — nothing to install, bypass or crash |
+| **OPA Gatekeeper** (Rego, [`templates/`](platform/k8s/admission/gatekeeper/templates/)) | registry = Artifactory only (init and ephemeral containers included: `kubectl debug` is no way around it) · digest required · CPU/memory limits · **every namespace must enforce PSA `restricted`** | general-purpose policy; the last rule closes PSA's gap — it only protects namespaces that carry its label |
+| **Kyverno** `ImageValidatingPolicy` ([`verify-signatures.yaml`](platform/k8s/admission/kyverno/verify-signatures.yaml)) | **every** image signed by `release.yml@refs/heads/main` (keyless), signatures fetched through Artifactory | native Cosign keyless verification (Gatekeeper would need an external-data provider for it) |
+
+Workload hardening ([`deployment.yaml`](platform/k8s/llm-gateway/deployment.yaml)):
+image by signed digest, UID 10001, read-only root filesystem, all
+capabilities dropped, no service-account token, CPU/memory limits.
+[`networkpolicy.yaml`](platform/k8s/llm-gateway/networkpolicy.yaml): default
+deny; only DNS and labelled clients → gateway:8000; **no internet egress for
+the gateway** (an LLM gateway that can reach anywhere is an exfiltration /
+SSRF channel).
+
+**Proven, not assumed** — [`admission_test.py`](platform/k8s/tests/admission_test.py)
+sends a compliant pod with exactly one thing broken, through the real
+admission chain (`--dry-run=server`):
+
+| Case | Result | Refused by |
+|---|---|---|
+| signed release, by digest | admitted | — |
+| same signed image, by **tag** | refused | Gatekeeper / Kyverno (both enforce digests) |
+| Docker Hub directly | refused | Gatekeeper / Kyverno |
+| allowlisted in Artifactory but **unsigned** (python base image) | refused | Kyverno |
+| no CPU/memory limits | refused | Gatekeeper |
+| privileged container | refused | Pod Security |
+| namespace without the PSA label | refused | Gatekeeper |
+
+**What testing it actually found:**
+
+| Finding | Impact | Fix |
+|---|---|---|
+| Gatekeeper's chart default is `failurePolicy: Ignore` | Gatekeeper down = every pod admitted unchecked | fail closed (`Fail`), Kyverno too |
+| …and fail-closed with the default webhook scope **deadlocked the cluster**: while Gatekeeper started, kube-controller-manager could not renew its Lease (kube-system) → lost leadership → never marked the webhook's own endpoint ready | every write refused, including Helm | webhook never called for system namespaces, and only for pods/namespaces; break-glass procedure in [`SETUP.md`](platform/kind/SETUP.md) |
+| Registry config bind-mounted from the repo went stale after a `git switch` (mount keeps the deleted directory) | nodes fell back to HTTPS → `ImagePullBackOff` | config copied into the nodes by `up.sh` |
+| The first test runner counted "webhook unreachable" as a successful denial | 5 false passes | a refusal counts only if the expected control made it |
+
+**Known limit, stated plainly:** system namespaces (control plane,
+Gatekeeper, Kyverno) are exempt from admission, so those add-ons pull from
+their upstream registries. In production they would be mirrored through
+Artifactory and pinned by digest too.
 
 ## Quick start
 

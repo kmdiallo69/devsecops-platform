@@ -14,6 +14,16 @@ docker inspect "$PROXY" >/dev/null 2>&1 || {
 kind get clusters 2>/dev/null | grep -qx "$CLUSTER" || kind create cluster --config cluster.yaml
 kubectl config use-context "kind-${CLUSTER}" >/dev/null
 
+# Registry settings into every node (re-run safe; containerd reads
+# certs.d on each pull, no restart needed).
+for node in $(kind get nodes --name "$CLUSTER"); do
+  for dir in containerd/certs.d/*/; do
+    host="$(basename "$dir")"
+    docker exec "$node" mkdir -p "/etc/containerd/certs.d/${host}"
+    docker exec -i "$node" sh -c "cat > '/etc/containerd/certs.d/${host}/hosts.toml'" < "${dir}hosts.toml"
+  done
+done
+
 # The nodes resolve `registry.local` to the proxy through Docker's DNS.
 docker network inspect kind --format '{{range .Containers}}{{.Name}} {{end}}' | grep -qw "$PROXY" \
   || docker network connect --alias registry.local kind "$PROXY"

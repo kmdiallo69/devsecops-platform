@@ -1,0 +1,52 @@
+# Signature verification at admission: in application namespaces, EVERY
+# image must carry a Cosign signature made by this repository's release
+# workflow, on main (keyless, Step 4). Not "a valid signature" — anyone can
+# sign keylessly — but the signature of THAT identity.
+#
+# Signatures are fetched through Artifactory, like the image itself (Step 4
+# finding: signatures must be readable through the proxy).
+apiVersion: policies.kyverno.io/v1beta1
+kind: ImageValidatingPolicy
+metadata:
+  name: require-release-signature
+spec:
+  failurePolicy: Fail # no verification, no pod
+  validationActions: [Deny]
+  webhookConfiguration:
+    timeoutSeconds: 15
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [kube-system, kube-public, kube-node-lease, local-path-storage, gatekeeper-system, kyverno]
+  # All images: an allowlisted but UNSIGNED image (e.g. the python base
+  # image, available through Artifactory) is refused too.
+  matchImageReferences:
+    - glob: "*"
+  validationConfigurations:
+    mutateDigest: false # never rewrite the pod: digests are required (Gatekeeper)
+    verifyDigest: true
+    required: true
+  credentials:
+    secrets: [artifactory-pull] # read-only identity, copied into the kyverno namespace
+    allowInsecureRegistry: true # local proxy is plain HTTP; TLS in a real cluster
+  attestors:
+    - name: release
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://token.actions.githubusercontent.com
+              subject: https://github.com/kmdiallo69/devsecops-platform/.github/workflows/release.yml@refs/heads/main
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validations:
+    - expression: >-
+        images.containers.map(image, verifyImageSignatures(image, [attestors.release])).all(e, e > 0)
+      message: >-
+        image is not signed by kmdiallo69/devsecops-platform release.yml on main
