@@ -6,6 +6,9 @@
 !*.tfvars.example
 backend.hcl
 crash.log
+# Saved plans: binary, can embed sensitive values
+tfplan
+*.tfplan
 
 # Secrets & local env
 .env
