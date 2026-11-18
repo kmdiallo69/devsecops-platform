@@ -66,6 +66,32 @@ admission chain runs, nothing is created. A refusal only counts if the
 expected control made it — "failed calling webhook" (controller down) is a
 failure, not a pass.
 
+## 7. Runtime detection (Falco)
+
+```bash
+platform/k8s/runtime/install.sh
+kubectl -n llm-gateway exec deploy/llm-gateway -- sh -c id
+kubectl -n llm-gateway exec deploy/llm-gateway -- python -c "import socket; s=socket.socket(); s.settimeout(3); print(s.connect_ex(('1.1.1.1', 443)))"
+sleep 5
+kubectl -n falco logs ds/falco -c falco --since=2m | grep -E "Unexpected process|tried to reach"
+```
+
+Expected: `Unexpected process in LLM gateway` for `sh` and for `id` (CRITICAL),
+`LLM gateway tried to reach the outside (dest=1.1.1.1:443 …)` (WARNING) — and
+the connection itself fails (non-zero code): blocked by NetworkPolicy AND
+detected by Falco.
+
+Alerts UI (password generated into the keychain by `install.sh`):
+
+```bash
+security find-generic-password -s falco-ui -w | tr -d '\n' | pbcopy
+kubectl -n falco port-forward svc/falco-falcosidekick-ui 2802:2802
+```
+
+Open http://127.0.0.1:2802 in a private window, user `admin`, paste with
+⌘A then ⌘V, then `pbcopy < /dev/null`. The chart default `admin:admin` is
+refused (401).
+
 ## Break-glass: the admission webhook blocks the cluster
 
 Both webhooks fail closed. If Gatekeeper is down and system components

@@ -20,7 +20,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 3 | JFrog Artifactory (self-hosted JCR): single entry point, remote-repo allowlists, immutable tags, least-privilege identities | Artifact governance | ✅ |
 | 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ✅ |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ✅ |
-| 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ⏳ |
+| 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ✅ |
 | 7 | Azure with Terraform: AKS (private, Workload Identity, Azure Policy add-on), Key Vault (CMK, rotation), Log Analytics — scanned by Checkov | Governed cloud foundation, key management | ⏳ |
 | 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity | No secret in Git or in images | ⏳ |
 | 9 | Defender for Cloud: CSPM, Defender for Containers, DevOps security (GitHub connector) | CSPM/CWPP + pipeline telemetry | ⏳ |
@@ -200,6 +200,38 @@ admission chain (`--dry-run=server`):
 Gatekeeper, Kyverno) are exempt from admission, so those add-ons pull from
 their upstream registries. In production they would be mirrored through
 Artifactory and pinned by digest too.
+
+## Runtime detection — Falco (`platform/k8s/runtime`)
+
+Admission control decides what may **start**; Falco watches what a running
+container actually **does** — the only layer that sees an attacker who got
+in through the application itself (RCE, SSRF, a malicious dependency).
+Kernel events via the modern eBPF probe (no kernel module), routed by
+Falcosidekick to a web UI (in production: Slack, PagerDuty or a SIEM).
+
+Rules written for **this** workload ([`falco-values.yaml`](platform/k8s/runtime/falco-values.yaml)),
+on top of Falco's default ruleset:
+
+| Rule | Priority | Logic |
+|---|---|---|
+| Unexpected process in LLM gateway | CRITICAL | the image runs one program (uvicorn/python): **any** other process — shell, `curl`, package manager — is an intrusion or an unannounced debug session (MITRE T1059) |
+| LLM gateway outbound connection attempt | WARNING | NetworkPolicy **blocks** internet egress; this **detects the attempt** — an SSRF or a prompt-injected tool call trying to exfiltrate (T1041) |
+
+Proven with real commands ([`SETUP.md` §7](platform/kind/SETUP.md)):
+`kubectl exec … sh -c id` → two CRITICAL alerts (`sh`, `id`) with pod,
+namespace, image and command line; a connection to `1.1.1.1:443` →
+refused by the NetworkPolicy **and** reported by Falco.
+
+| Finding | Impact | Fix |
+|---|---|---|
+| The process rule also fired on runc's own bootstrap process (`6 init`, parent `runc`, uid 0) — twice per `kubectl exec` | alert noise: 4 alerts where 2 mattered | narrow exclusion (`parent = runc and args = init`); the exec'd process is still alerted |
+| Falcosidekick UI ships with `admin:admin` | anyone reaching the UI reads every security event | password generated into the keychain, injected as a secret; `admin:admin` → 401 verified |
+
+**Trade-off, stated plainly:** a kernel sensor needs privileges our own
+policies forbid. `falco` is therefore the single namespace allowed to run
+privileged pods — labelled `enforce: privileged` on purpose, exempt from
+Gatekeeper and Kyverno, with PSA `warn`/`audit` kept at `restricted` so its
+privileged pods stay visible.
 
 ## Quick start
 
