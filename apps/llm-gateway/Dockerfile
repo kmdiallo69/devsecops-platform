@@ -1,11 +1,12 @@
 # =============================================================================
 # LLM gateway — multi-stage, non-root, hash-verified dependencies, no pip
 # =============================================================================
-# The base image tag is pinned to an immutable digest in Step 4
-# (supply chain); a tag like 3.12-slim can be re-pointed upstream at any time.
+# Base image pinned by DIGEST: a tag like 3.12-slim is re-pointed upstream
+# at any time. The tag stays for humans (and for Dependabot, which bumps
+# the digest weekly through a normal, gated PR).
 
 # --- Stage 1: builder ---------------------------------------------------------
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -23,7 +24,7 @@ RUN /opt/venv/bin/pip install --require-hashes -r requirements.txt \
  && /opt/venv/bin/python -m pip uninstall -y pip
 
 # --- Stage 2: runtime ---------------------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
 
 # apt-get upgrade: official base images lag behind distro security fixes
 # (found by CI: zlib1g CVE-2026-85091 was fixed in Debian, but not yet in
