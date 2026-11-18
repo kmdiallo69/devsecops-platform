@@ -1,0 +1,95 @@
+# Two one-shot client pods calling the gateway: identical except for the
+# `llm-gateway-client` label. Same signed image (it ships Python), so the
+# test needs no extra image. Restricted-profile compliant, or PSA would
+# reject the test itself.
+#
+#   kubectl apply -f platform/k8s/tests/netpol-clients.yaml
+#   kubectl -n llm-gateway logs client-allowed   -> 200
+#   kubectl -n llm-gateway logs client-denied    -> timed out
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client-allowed
+  namespace: llm-gateway
+  annotations:
+    # One-shot pod (runs one request, then exits): a probe has nothing to probe.
+    checkov.io/skip1: CKV_K8S_8=one-shot test pod, exits after one request
+    checkov.io/skip2: CKV_K8S_9=one-shot test pod, exits after one request
+  labels:
+    llm-gateway-client: "true"
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  imagePullSecrets:
+    - name: artifactory-pull
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: client
+      image: registry.local:8085/docker/kmdiallo69/llm-gateway@sha256:2d03281013ea2d98f3cec22c2fc5940b42863fd98ef83e9bd0f451b28898976e
+      imagePullPolicy: Always
+      command:
+        - python
+        - -c
+        - |
+          import urllib.request
+          try:
+              r = urllib.request.urlopen("http://llm-gateway:8000/healthz", timeout=5)
+              print(r.status)
+          except Exception as e:
+              print(type(e).__name__, e)
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client-denied
+  namespace: llm-gateway
+  annotations:
+    # One-shot pod (runs one request, then exits): a probe has nothing to probe.
+    checkov.io/skip1: CKV_K8S_8=one-shot test pod, exits after one request
+    checkov.io/skip2: CKV_K8S_9=one-shot test pod, exits after one request
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  imagePullSecrets:
+    - name: artifactory-pull
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: client
+      image: registry.local:8085/docker/kmdiallo69/llm-gateway@sha256:2d03281013ea2d98f3cec22c2fc5940b42863fd98ef83e9bd0f451b28898976e
+      imagePullPolicy: Always
+      command:
+        - python
+        - -c
+        - |
+          import urllib.request
+          try:
+              r = urllib.request.urlopen("http://llm-gateway:8000/healthz", timeout=5)
+              print(r.status)
+          except Exception as e:
+              print(type(e).__name__, e)
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi

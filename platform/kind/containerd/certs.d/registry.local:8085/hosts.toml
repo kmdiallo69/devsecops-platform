@@ -1,0 +1,5 @@
+# Artifactory proxy, reached from the kind nodes over the kind Docker network.
+server = "http://registry.local:8085"
+
+[host."http://registry.local:8085"]
+  capabilities = ["pull", "resolve"]
