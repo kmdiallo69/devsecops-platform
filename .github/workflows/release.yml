@@ -1,9 +1,10 @@
 # =============================================================================
-# Release — build, scan, publish, sign, attest
+# Release — build, publish, scan, sign, attest
 # =============================================================================
 # Runs on every merge to main that changes the app. Produces ONE immutable
-# reference — ghcr.io/<owner>/llm-gateway@sha256:… — and three verifiable
-# claims about it, all signed keylessly (Sigstore):
+# reference — ghcr.io/<owner>/llm-gateway@sha256:… (a linux/amd64 +
+# linux/arm64 index) — and three verifiable claims about it, all signed
+# keylessly (Sigstore):
 #
 #   Claim                 Tool                      Answers
 #   --------------------  ------------------------  ---------------------------
@@ -20,6 +21,10 @@
 #
 # Why sign the DIGEST, never a tag: a tag is a mutable pointer (Step 3
 # proved it can be swapped in the registry); a digest is the content itself.
+#
+# Pushed BEFORE the scan, signed only AFTER it: an image that fails the scan
+# stays in the registry unsigned — and unsigned means undeployable, because
+# the cluster admits signed digests only (Step 5).
 
 name: release
 
@@ -41,6 +46,11 @@ concurrency:
 env:
   APP_DIR: apps/llm-gateway
   IMAGE: ghcr.io/${{ github.repository_owner }}/llm-gateway
+  # Classic signature storage: `sha256-<digest>.sig` / `.att` TAGS. The
+  # newer default (OCI 1.1 referrers) is invisible through a registry proxy
+  # that answers the referrers API with an empty list — Artifactory does,
+  # so consumers pulling through it found "no signatures" (Step 4 finding).
+  COSIGN_FORMAT: --new-bundle-format=false --use-signing-config=false
 
 jobs:
   release:
@@ -56,22 +66,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # One single-platform manifest, always (no buildx attestation index):
-      # a consistent format is what makes the registry's no-overwrite rule
-      # effective (Step 3 finding). Attestations are attached by cosign.
-      - name: Build
-        run: docker build --pull -t "${IMAGE}:sha-${GITHUB_SHA}" "$APP_DIR"
-
-      # Scanned again at release time, not only on the PR: a CVE published
-      # between the PR and the merge must not get signed.
-      - name: Trivy image scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE }}:sha-${{ github.sha }}
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -79,48 +75,87 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The tag is only a human-readable label; everything below targets
-      # the digest the registry returned.
-      - name: Push
-        id: push
+      # Same format on every release: an index of exactly two images.
+      # BuildKit's own attestation manifests are turned off (they would add
+      # an "unknown/unknown" entry to the index); ours come from cosign and
+      # attest-build-provenance below. A consistent format is what makes the
+      # registry's no-overwrite rule effective (Step 3 finding).
+      - name: Build and push (amd64 + arm64)
+        id: build
         run: |
-          docker push "${IMAGE}:sha-${GITHUB_SHA}"
-          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:sha-${GITHUB_SHA}" | cut -d@ -f2)"
-          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          docker buildx build --pull \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=false --sbom=false \
+            --tag "${IMAGE}:sha-${GITHUB_SHA}" \
+            --metadata-file metadata.json \
+            --push "$APP_DIR"
+          echo "digest=$(jq -r '."containerimage.digest"' metadata.json)" >> "$GITHUB_OUTPUT"
 
-      - name: SBOM (Syft, SPDX)
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      # Scanned again at release time, not only on the PR: a CVE published
+      # between the PR and the merge must not get signed. Both platforms:
+      # their OS packages are different binaries.
+      - name: Trivy scan (linux/amd64)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
         with:
-          image: ${{ env.IMAGE }}:sha-${{ github.sha }}
-          format: spdx-json
-          output-file: sbom.spdx.json
-          syft-version: v1.57.2
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Trivy scan (linux/arm64)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
 
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: v3.1.4
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+        with:
+          syft-version: v1.57.2
 
+      # --recursive: signs the index AND each platform image, so a
+      # reference to either one verifies.
       - name: Sign (keyless)
         env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes --recursive $COSIGN_FORMAT "${IMAGE}@${DIGEST}"
 
-      - name: Attest SBOM
+      # One SBOM per platform, attested on that platform's own digest:
+      # an arm64 image does not contain the same packages as an amd64 one.
+      - name: SBOM per platform (Syft, SPDX) + attest
         env:
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: cosign attest --yes --type spdxjson --predicate sbom.spdx.json "${IMAGE}@${DIGEST}"
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          for arch in amd64 arm64; do
+            pdigest="$(docker buildx imagetools inspect --raw "${IMAGE}@${DIGEST}" \
+              | jq -r --arg a "$arch" '.manifests[] | select(.platform.architecture == $a) | .digest')"
+            "$SYFT" scan "registry:${IMAGE}@${pdigest}" -o "spdx-json=sbom-${arch}.spdx.json"
+            cosign attest --yes $COSIGN_FORMAT --type spdxjson \
+              --predicate "sbom-${arch}.spdx.json" "${IMAGE}@${pdigest}"
+          done
 
       - name: Attest SLSA build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
           create-storage-record: false # would need an extra permission
 
       - name: Summary
         env:
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           {
             echo "### Released"
