@@ -18,7 +18,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 1 | Demo app + LLM gateway (FastAPI), hardened Dockerfile | Secure-by-default containers | ✅ |
 | 2 | CI security gates (GitHub Actions): Gitleaks, Semgrep (SAST), pip-audit (SCA), Checkov + Hadolint (IaC), Trivy (image) — required to merge | SAST / SCA / IaC / secret detection as merge gates | ✅ |
 | 3 | JFrog Artifactory (self-hosted JCR): single entry point, remote-repo allowlists, immutable tags, least-privilege identities | Artifact governance | ✅ |
-| 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | 🚧 |
+| 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ✅ |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ⏳ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ⏳ |
 | 7 | Azure with Terraform: AKS (private, Workload Identity, Azure Policy add-on), Key Vault (CMK, rotation), Log Analytics — scanned by Checkov | Governed cloud foundation, key management | ⏳ |
@@ -108,6 +108,50 @@ repository configuration API but not the user/permission APIs (Pro only), so
 the two identities and their permissions are created in the UI, following
 the exact steps in [`platform/artifactory/SETUP.md`](platform/artifactory/SETUP.md).
 With Artifactory Pro, those would be Terraform (`jfrog/platform` provider).
+
+## Software supply chain — sign, SBOM, provenance (`.github/workflows/release.yml`)
+
+Every merge to `main` that changes the app produces **one immutable
+reference** — `ghcr.io/kmdiallo69/llm-gateway@sha256:…`, an index of
+`linux/amd64` + `linux/arm64` — and three verifiable claims about it:
+
+| Claim | Tool | Answers |
+|---|---|---|
+| Signature (index + each platform) | Cosign, keyless | did **our** pipeline produce it? |
+| SBOM, one per platform (SPDX) | Syft + `cosign attest` | what exactly is inside it? |
+| SLSA build provenance | `actions/attest-build-provenance` | which commit, workflow and runner built it? |
+
+```
+build (amd64+arm64) ─▶ push ─▶ Trivy (both platforms) ─▶ sign ─▶ SBOM attest ─▶ provenance
+                         │            │ fails?
+                         │            └──▶ stops here: image stays UNSIGNED = undeployable
+                         └── everything after this targets the digest, never the tag
+```
+
+| Control | Why |
+|---|---|
+| **Keyless** signing (GitHub OIDC → Sigstore Fulcio, logged in Rekor) | no private key exists to steal, leak or rotate |
+| Verification pins the **signer identity**: this repo's `release.yml` on `refs/heads/main` | a valid signature is not enough — anyone can sign keylessly; a fork or another branch fails |
+| Digest only — [`scripts/verify-release.sh`](scripts/verify-release.sh) refuses a tag | a tag is a mutable pointer (proven in Step 3) |
+| Scanned again at release time, signed only if clean | a CVE published between PR and merge never gets signed |
+| BuildKit attestation manifests off; one index format on every release | keeps the registry's no-overwrite rule effective (Step 3 finding) |
+
+```bash
+scripts/verify-release.sh ghcr.io/kmdiallo69/llm-gateway@sha256:<digest>
+scripts/verify-release.sh 127.0.0.1:8085/docker/kmdiallo69/llm-gateway@sha256:<digest>   # through Artifactory
+```
+
+**What testing it actually found:**
+
+| Finding | Impact | Fix |
+|---|---|---|
+| `docker build` on the CI runner pushed an **index** (amd64 + an `unknown/unknown` BuildKit attestation), not a single image — and amd64 only | broke the "one format" rule; image unusable on ARM nodes | explicit multi-arch buildx build, `--provenance=false --sbom=false` |
+| Consumers pulling **through Artifactory** got `no signatures found`, while GHCR verified fine | signed images look unsigned behind the proxy — admission would reject every release | Artifactory answers the OCI referrers API with an **empty list**, so Cosign v3 never falls back to the referrers tag. Signing switched to the classic tag format (`sha256-….sig` / `.att`), served like any tag |
+
+**Trade-off, stated plainly:** Cosign marks the classic format as
+deprecated. It is kept deliberately because it is what works through the
+registry proxy today; the switch back to OCI referrers is a one-line change
+(`COSIGN_FORMAT` in the workflow) once the proxy serves them.
 
 ## Quick start
 
