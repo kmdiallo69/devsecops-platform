@@ -1,5 +1,6 @@
-# Namespaces Gatekeeper does not police: the control plane and the
-# admission controllers themselves (fail-closed webhooks would otherwise
+# Namespaces Gatekeeper does not police: the control plane, the
+# admission controllers themselves and Falco (a kernel sensor needs the
+# privileges our policies forbid) (fail-closed webhooks would otherwise
 # block their own restart). Their images come from upstream registries —
 # in production they would be mirrored through Artifactory too.
 apiVersion: config.gatekeeper.sh/v1alpha1
@@ -16,4 +17,5 @@ spec:
         - local-path-storage
         - gatekeeper-system
         - kyverno
+        - falco
       processes: ["*"]

@@ -24,7 +24,7 @@ spec:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: NotIn
-          values: [kube-system, kube-public, kube-node-lease, local-path-storage, gatekeeper-system, kyverno]
+          values: [kube-system, kube-public, kube-node-lease, local-path-storage, gatekeeper-system, kyverno, falco]
   # All images: an allowlisted but UNSIGNED image (e.g. the python base
   # image, available through Artifactory) is refused too.
   matchImageReferences:

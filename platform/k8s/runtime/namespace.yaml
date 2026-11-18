@@ -1,0 +1,12 @@
+# The ONE namespace allowed to run privileged pods, on purpose and in
+# writing: Falco is a kernel sensor (eBPF), it cannot watch syscalls from a
+# `restricted` pod. Exempt from Gatekeeper and Kyverno for the same reason
+# (see platform/k8s/admission). Nothing else may be deployed here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: falco
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: restricted # every privileged pod still shows up as a warning
+    pod-security.kubernetes.io/audit: restricted

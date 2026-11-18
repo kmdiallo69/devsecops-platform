@@ -24,6 +24,7 @@ validatingWebhookExemptNamespacesLabels:
     - local-path-storage
     - gatekeeper-system
     - kyverno
+    - falco
 # 2. Only the resources the policies actually cover go through it: leases,
 #    endpoints, events... never wait on Gatekeeper.
 validatingWebhookCustomRules:
