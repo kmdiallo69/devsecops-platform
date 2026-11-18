@@ -50,6 +50,38 @@ kubectl delete -f platform/k8s/tests/netpol-clients.yaml
 Expected: `200` · `TimeoutError` (or `URLError … timed out`) · the gateway
 itself cannot reach the internet (`timed out`).
 
+## 6. Admission control (Gatekeeper + Kyverno)
+
+```bash
+platform/k8s/admission/install.sh
+python3 platform/k8s/tests/admission_test.py
+kubectl -n llm-gateway rollout restart deploy/llm-gateway
+kubectl -n llm-gateway rollout status deploy/llm-gateway
+```
+
+Expected: `7/7 controls behaved as expected`, then a successful rollout
+(the signed release passes all three layers). Each test case is a compliant
+pod with exactly one thing broken, sent with `--dry-run=server`: the real
+admission chain runs, nothing is created. A refusal only counts if the
+expected control made it — "failed calling webhook" (controller down) is a
+failure, not a pass.
+
+## Break-glass: the admission webhook blocks the cluster
+
+Both webhooks fail closed. If Gatekeeper is down and system components
+cannot write (symptom: every `kubectl apply` fails with
+`failed calling webhook "validation.gatekeeper.sh"`), remove the webhook
+registration — no policy is deleted — then re-run `install.sh`:
+
+```bash
+kubectl delete validatingwebhookconfiguration gatekeeper-validating-webhook-configuration
+platform/k8s/admission/install.sh
+```
+
+The webhook scope (`gatekeeper-values.yaml`) is what keeps this from
+happening in normal operation: system namespaces are never sent to the
+webhook, and only pods and namespaces are.
+
 ## Tear down
 
 ```bash

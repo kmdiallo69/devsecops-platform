@@ -1,0 +1,48 @@
+# The rules, switched on. `deny` = refused at admission; the audit
+# controller also reports existing objects that violate them.
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sAllowedRegistries
+metadata:
+  name: only-artifactory
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: [Pod]
+  parameters:
+    prefixes:
+      - registry.local:8085/docker/
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sImageDigest
+metadata:
+  name: images-by-digest
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: [Pod]
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLimits
+metadata:
+  name: cpu-and-memory-limits
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: [Pod]
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sNamespacePSARestricted
+metadata:
+  name: namespaces-psa-restricted
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: [Namespace]

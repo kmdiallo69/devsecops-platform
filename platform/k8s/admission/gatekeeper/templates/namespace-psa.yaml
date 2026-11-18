@@ -1,0 +1,23 @@
+# Pod Security Admission only protects namespaces that carry its label — a
+# new namespace created WITHOUT it would accept privileged pods. This rule
+# closes that gap: every namespace must enforce the `restricted` profile.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8snamespacepsarestricted
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sNamespacePSARestricted
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8snamespacepsarestricted
+
+        violation[{"msg": msg}] {
+          value := object.get(input.review.object.metadata, ["labels", "pod-security.kubernetes.io/enforce"], "")
+          value != "restricted"
+          msg := sprintf("namespace <%v> must set label pod-security.kubernetes.io/enforce=restricted (got <%v>)",
+            [input.review.object.metadata.name, value])
+        }

@@ -2,9 +2,11 @@
 #
 # The nodes reach the Artifactory proxy as `registry.local:8085`: up.sh
 # attaches the proxy container to the kind Docker network under that name.
-# containerd reads per-registry settings from /etc/containerd/certs.d,
-# mounted from ./containerd/certs.d (plain HTTP to the proxy — on a real
-# cluster, TLS terminates there).
+# containerd reads per-registry settings from /etc/containerd/certs.d;
+# up.sh COPIES ./containerd/certs.d into each node (plain HTTP to the proxy —
+# on a real cluster, TLS terminates there). Not a bind mount: a mount keeps
+# pointing at the old directory once git recreates it (branch switch), and
+# the nodes silently fell back to HTTPS — ImagePullBackOff.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: devsecops
@@ -12,10 +14,6 @@ nodes:
   - role: control-plane
     # Pinned by digest, like every other image in this repo.
     image: kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
-    extraMounts:
-      - hostPath: ./containerd/certs.d
-        containerPath: /etc/containerd/certs.d
-        readOnly: true
 containerdConfigPatches:
   - |-
     [plugins."io.containerd.grpc.v1.cri".registry]

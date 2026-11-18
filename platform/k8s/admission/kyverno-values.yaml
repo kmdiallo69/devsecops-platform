@@ -1,0 +1,15 @@
+# Kyverno — used ONLY for image signature verification (Gatekeeper owns
+# the other rules). Chart version pinned in install.sh.
+
+admissionController:
+  replicas: 1
+
+# Generates policy reports (the audit view of existing workloads).
+reportsController:
+  enabled: true
+
+# Not used: no generate/mutate-existing or cleanup policies in this repo.
+backgroundController:
+  enabled: false
+cleanupController:
+  enabled: false
