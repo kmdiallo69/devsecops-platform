@@ -26,14 +26,17 @@ KV="$(out key_vault_name)"
 TENANT="$(out tenant_id)"
 CLIENT_ID="$(out app_identity_client_id)"
 
-WORK="$(mktemp -d)"
+# Temporary overlay INSIDE deploy/k8s (git-ignored): kustomize refuses
+# absolute resource paths, and relative paths through a system temp dir
+# break on symlinked temp roots (macOS /var -> /private/var).
+WORK="$(mktemp -d "${ROOT}/deploy/k8s/.render.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 cat > "${WORK}/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ${OVERLAY}
+  - ../overlays/${ENV}
 patches:
   - target:
       kind: SecretProviderClass

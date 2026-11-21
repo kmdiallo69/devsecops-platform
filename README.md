@@ -37,7 +37,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ✅ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ✅ |
 | 7 | Azure with Terraform (modules + dev/staging/prod): private AKS, WAF_v2, NAT Gateway, NSGs, Key Vault CMK + private endpoint, Azure Policy, remote state | Governed cloud foundation, key management | ✅ |
-| 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity | No secret in Git or in images | ⏳ |
+| 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity, write-only Terraform secret, rotation without restart | No secret in Git, images, state, env vars or Kubernetes Secrets | ✅ |
 | 9 | Defender for Cloud: CSPM, Defender for Containers, DevOps security (GitHub connector) | CSPM/CWPP + pipeline telemetry | ⏳ |
 | 10 | AI/LLM security: guardrails mapped to the OWASP LLM Top 10 (prompt injection, output handling, PII, rate limits) + tests | Securing AI/LLM platforms | ⏳ |
 | 11 | Threat model (STRIDE) + architecture docs | Secure design | ⏳ |
@@ -271,6 +271,40 @@ SQL injection and XSS refused (`403`), rate limit enforced, port 80 closed,
 API server with no public FQDN, admin kubeconfig refused, pod egress seen
 from the outside as the NAT IP. Six issues found by deploying for real are
 listed in [`infra/terraform/README.md`](infra/terraform/README.md).
+
+## Secrets without secrets (`infra/terraform/modules/app-identity`, `deploy/k8s/components/aks-workload-identity`)
+
+The LLM provider API key reaches the app as a **read-only file** — and
+exists nowhere else:
+
+```
+Key Vault secret ──private endpoint──▶ Secrets Store CSI driver ──▶ /mnt/secrets/llm-api-key (tmpfs, read-only)
+       ▲                                     │
+       │ Key Vault Secrets User              │ ServiceAccount token, exchanged by OIDC federation
+       │ on THIS secret only                 ▼
+       └──────────── managed identity ◀── Entra ID (trusts llm-gateway/llm-gateway of this cluster only)
+```
+
+| Where the key is NOT | How |
+|---|---|
+| Git, the image | never committed; supplied as `TF_VAR_llm_api_key` from the OS keychain |
+| Terraform plan and **state** | `value_wo` (write-only attribute) + `ephemeral` variable |
+| An environment variable | the app reads `LLM_API_KEY_FILE` (env vars leak via `/proc`, child processes, dumps) |
+| A Kubernetes `Secret` | the CSI driver mounts the file directly (no `secretObjects` sync) |
+| The app container's credentials | the pod is not labelled for Workload Identity: no Azure token, no SA token in the container — only the CSI driver uses one |
+
+**Proven on Azure** (dev), with hashes only — the key is never displayed:
+
+| Test | Result |
+|---|---|
+| Key searched in the remote state and the saved plan | not found (both) |
+| SHA-256 of the mounted file vs the keychain value | identical |
+| Inside the app container | key not in env, no `AZURE_*` vars, no federated token, no SA token, mount read-only, 0 Kubernetes Secrets |
+| **Rotation**: new value pushed (`llm_api_key_version` 1 → 2, plan = 1 in-place change) | same pod, 0 restarts, new hash read **within 45 s** |
+
+Rotation without restart: the CSI driver replaces the file in place (2-min
+sync); the app re-reads it when it changes and sends the key per request
+(`apps/llm-gateway/app/secrets.py`, tested in `tests/test_secrets.py`).
 
 ## Quick start
 
