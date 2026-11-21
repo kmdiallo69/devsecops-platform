@@ -29,3 +29,15 @@ output "appgw_cidr" {
 output "kubectl" {
   value = module.platform.kubectl
 }
+
+output "tenant_id" {
+  value = module.platform.tenant_id
+}
+
+output "app_identity_client_id" {
+  value = module.platform.app_identity_client_id
+}
+
+output "llm_api_key_secret_name" {
+  value = module.platform.llm_api_key_secret_name
+}

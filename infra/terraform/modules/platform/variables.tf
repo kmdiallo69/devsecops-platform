@@ -119,3 +119,17 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "llm_api_key" {
+  description = "LLM provider API key. Ephemeral + write-only: never in plan or state. null = placeholder."
+  type        = string
+  default     = null
+  sensitive   = true
+  ephemeral   = true
+}
+
+variable "llm_api_key_version" {
+  description = "Bump to push a new llm_api_key."
+  type        = number
+  default     = 1
+}

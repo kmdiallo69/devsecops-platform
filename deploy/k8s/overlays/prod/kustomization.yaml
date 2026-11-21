@@ -5,6 +5,7 @@ resources:
   - ../../base
 components:
   - ../../components/aks-ingress
+  - ../../components/aks-workload-identity
 
 # The release running in prod. Promoted from staging; one replica per zone.
 # Promotion = a reviewed PR changing this digest — nothing else moves.

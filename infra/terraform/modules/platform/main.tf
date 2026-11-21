@@ -120,6 +120,24 @@ module "app_gateway" {
   tags                       = local.tags
 }
 
+# The app's own identity: reads ONE secret (the LLM API key) through
+# Workload Identity — no client secret, no Kubernetes Secret.
+module "llm_gateway_identity" {
+  source              = "../app-identity"
+  name                = local.name
+  app_name            = "llmgw-app"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = var.location
+  oidc_issuer_url     = module.aks.oidc_issuer_url
+  namespace           = "llm-gateway"
+  service_account     = "llm-gateway"
+  key_vault_id        = module.key_vault.id
+  secret_name         = "llm-api-key"
+  secret_value        = var.llm_api_key
+  secret_version      = var.llm_api_key_version
+  tags                = local.tags
+}
+
 module "policy" {
   source              = "../policy"
   resource_group_id   = azurerm_resource_group.this.id

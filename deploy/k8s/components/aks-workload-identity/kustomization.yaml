@@ -1,0 +1,47 @@
+# The LLM API key, from Azure Key Vault, as a read-only FILE in the pod.
+#
+#   Secrets Store CSI driver ──(SA token, OIDC federation)──▶ Entra ID
+#        ──▶ managed identity with Key Vault Secrets User on ONE secret
+#        ──▶ Key Vault private endpoint ──▶ /mnt/secrets/llm-api-key (tmpfs)
+#
+# No Kubernetes Secret (no secretObjects sync), no env var, no client
+# secret. The app container receives no Azure credential at all: the pod is
+# NOT labelled azure.workload.identity/use, so no federated token is
+# injected into it — only the CSI driver uses one, at mount time.
+#
+# clientID / keyvaultName / tenantId come from Terraform outputs and are set
+# at deploy time (scripts/deploy-aks.sh): they change on every deployment
+# (random name suffix), and none of them is a secret.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - secretproviderclass.yaml
+# Inline JSON patches (not a partial Deployment file: scanners would read a
+# partial manifest as a real, insecure Deployment).
+patches:
+  - target:
+      kind: Deployment
+      name: llm-gateway
+    patch: |-
+      # The app reads the key from this file at each upstream call: a
+      # rotation (CSI re-sync every 2 minutes) applies without restart.
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: LLM_API_KEY_FILE
+          value: /mnt/secrets/llm-api-key
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts/-
+        value:
+          name: secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: llm-gateway-secrets # checkov:skip=CKV_SECRET_6: the NAME of a SecretProviderClass, not a secret value

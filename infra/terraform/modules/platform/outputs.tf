@@ -36,3 +36,16 @@ output "kubectl" {
   description = "Private cluster: kubectl through Azure Resource Manager (Entra ID + Azure RBAC)."
   value       = "az aks command invoke -g ${azurerm_resource_group.this.name} -n ${module.aks.name} --command"
 }
+
+output "tenant_id" {
+  value = data.azurerm_client_config.current.tenant_id
+}
+
+output "app_identity_client_id" {
+  description = "Workload Identity client ID of the llm-gateway ServiceAccount."
+  value       = module.llm_gateway_identity.client_id
+}
+
+output "llm_api_key_secret_name" {
+  value = module.llm_gateway_identity.secret_name
+}

@@ -26,6 +26,9 @@ module "platform" {
   waf_rate_limit_per_minute = 120
   appgw_autoscale           = { min = 2, max = 10 }
 
+  llm_api_key         = var.llm_api_key
+  llm_api_key_version = var.llm_api_key_version
+
   tags = {
     cost_center = "platform"
     owner       = "devsecops"
