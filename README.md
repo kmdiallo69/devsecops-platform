@@ -36,7 +36,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ✅ |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ✅ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ✅ |
-| 7 | Azure with Terraform (modules + dev/staging/prod): private AKS, WAF_v2, NAT Gateway, NSGs, Key Vault CMK + private endpoint, Azure Policy, remote state | Governed cloud foundation, key management | 🚧 |
+| 7 | Azure with Terraform (modules + dev/staging/prod): private AKS, WAF_v2, NAT Gateway, NSGs, Key Vault CMK + private endpoint, Azure Policy, remote state | Governed cloud foundation, key management | ✅ |
 | 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity | No secret in Git or in images | ⏳ |
 | 9 | Defender for Cloud: CSPM, Defender for Containers, DevOps security (GitHub connector) | CSPM/CWPP + pipeline telemetry | ⏳ |
 | 10 | AI/LLM security: guardrails mapped to the OWASP LLM Top 10 (prompt injection, output handling, PII, rate limits) + tests | Securing AI/LLM platforms | ⏳ |

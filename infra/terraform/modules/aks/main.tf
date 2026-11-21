@@ -196,6 +196,13 @@ resource "azurerm_kubernetes_cluster_node_pool" "user" {
     max_surge = var.user_pool.max_surge
   }
 
+  # Destroy order: Terraform deletes in reverse dependency order, and the
+  # admin role assignment only depended on the cluster — so it was deleted
+  # IN PARALLEL with this pool, and operators lost kubectl access while the
+  # pool was still draining (found during a real teardown). Depending on it
+  # here keeps admin access until the pool is gone.
+  depends_on = [azurerm_role_assignment.cluster_admins]
+
   tags = var.tags
 }
 
