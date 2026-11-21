@@ -18,6 +18,7 @@ spec:
       labels:
         app: llm-gateway
     spec:
+      serviceAccountName: llm-gateway
       # The app never calls the Kubernetes API: no token mounted to steal.
       automountServiceAccountToken: false
       securityContext:

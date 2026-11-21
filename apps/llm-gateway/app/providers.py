@@ -5,6 +5,8 @@ Ollama and Azure AI Foundry all expose — swapping the inference platform is
 a configuration change, not a code change.
 """
 
+from collections.abc import Callable
+
 import httpx
 
 from .config import Settings
@@ -31,17 +33,40 @@ class MockProvider:
         pass
 
 
+class _BearerFromSource(httpx.Auth):
+    """Adds the API key at REQUEST time, read from its source each time —
+    never stored as a default header, so a rotated key is used on the very
+    next call."""
+
+    def __init__(self, source: Callable[[], str]):
+        self._source = source
+
+    def auth_flow(self, request):
+        key = self._source()
+        if key:
+            request.headers["Authorization"] = f"Bearer {key}"
+        yield request
+
+
 class OpenAICompatibleProvider:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
         self.model = settings.model
-        headers = {"Authorization": f"Bearer {settings.api_key}"} if settings.api_key else {}
+        self._key = settings.api_key_source()
+        self._key_required = settings.key_required
         # Explicit timeout: without one, a hung model server would hold the
         # request (and a worker) open forever.
         self._client = httpx.AsyncClient(
-            base_url=settings.base_url, headers=headers, timeout=settings.timeout_seconds
+            base_url=settings.base_url,
+            auth=_BearerFromSource(self._key),
+            timeout=settings.timeout_seconds,
+            transport=transport,
         )
 
     async def ready(self) -> bool:
+        # A configured but missing/empty key = not ready: the pod receives no
+        # traffic it would answer with upstream 401s.
+        if self._key_required and not self._key():
+            return False
         try:
             r = await self._client.get("/models", timeout=3)
             return r.status_code == 200

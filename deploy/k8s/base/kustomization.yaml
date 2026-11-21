@@ -4,6 +4,7 @@ kind: Kustomization
 # which applies files alphabetically — a Deployment before its Namespace.
 resources:
   - namespace.yaml
+  - serviceaccount.yaml
   - networkpolicy.yaml
   - deployment.yaml
   - service.yaml
