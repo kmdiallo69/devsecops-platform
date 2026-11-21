@@ -1,0 +1,35 @@
+# prod: AKS, VNet 10.30.0.0/16 (infra/terraform/environments/prod).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+components:
+  - ../../components/aks-ingress
+
+# The release running in prod. Promoted from staging; one replica per zone.
+# Promotion = a reviewed PR changing this digest — nothing else moves.
+images:
+  - name: ghcr.io/kmdiallo69/llm-gateway
+    digest: sha256:4dd9c65004878665eed59d8bb36ab792940dc4540f3206a2912a01e31d84a820
+
+replicas:
+  - name: llm-gateway
+    count: 3
+
+patches:
+  # Terraform output `ingress_ilb_ip` of this environment.
+  - target:
+      kind: Service
+      name: llm-gateway
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/service.beta.kubernetes.io~1azure-load-balancer-ipv4
+        value: 10.30.3.250
+  # snet-appgw of this environment: the only source allowed into the pods.
+  - target:
+      kind: NetworkPolicy
+      name: gateway-ingress-from-waf
+    patch: |-
+      - op: replace
+        path: /spec/ingress/0/from/0/ipBlock/cidr
+        value: 10.30.4.0/24

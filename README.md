@@ -8,6 +8,21 @@ Artifactory), and the cluster only admits workloads that meet policy.
 Built **local-first** (kind cluster, zero cloud cost), then deployed to
 **Azure** (AKS, Key Vault, Azure Policy, Defender for Cloud) with Terraform.
 
+## Repository layout
+
+```
+apps/llm-gateway/          the application (FastAPI) + hardened Dockerfile
+.github/workflows/         security-ci (PR gates), release (sign, SBOM, provenance)
+infra/terraform/           Azure: bootstrap (state), modules, environments/{dev,staging,prod}
+deploy/k8s/                Kustomize: base + components + overlays/{local,dev,staging,prod}
+platform/local/            local lab: Artifactory, kind, Gatekeeper/Kyverno, Falco, tests
+scripts/                   verify-release.sh (signature, SBOM, provenance by digest)
+```
+
+One workload contract (`deploy/k8s/base`), one infrastructure composition
+(`infra/terraform/modules/platform`): environments differ by parameters,
+never by code. Promoting a release = a PR changing one digest in an overlay.
+
 ## Roadmap
 
 Each step is one commit (or a small series), tested for real before moving on.
@@ -21,7 +36,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 4 | Supply chain: SBOM (Syft), Cosign keyless signing, SLSA provenance | Signed images + provenance | ✅ |
 | 5 | Local cluster (kind): Pod Security Admission, NetworkPolicies, OPA Gatekeeper (allowed registries, no privileged, required limits), signature verification at admission | Policy enforcement | ✅ |
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ✅ |
-| 7 | Azure with Terraform: AKS (private, Workload Identity, Azure Policy add-on), Key Vault (CMK, rotation), Log Analytics — scanned by Checkov | Governed cloud foundation, key management | ⏳ |
+| 7 | Azure with Terraform (modules + dev/staging/prod): private AKS, WAF_v2, NAT Gateway, NSGs, Key Vault CMK + private endpoint, Azure Policy, remote state | Governed cloud foundation, key management | 🚧 |
 | 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity | No secret in Git or in images | ⏳ |
 | 9 | Defender for Cloud: CSPM, Defender for Containers, DevOps security (GitHub connector) | CSPM/CWPP + pipeline telemetry | ⏳ |
 | 10 | AI/LLM security: guardrails mapped to the OWASP LLM Top 10 (prompt injection, output handling, PII, rate limits) + tests | Securing AI/LLM platforms | ⏳ |
@@ -68,7 +83,7 @@ grants, `persist-credentials: false` on every checkout.
 | `checkov-action` pinned from its "latest release" — published in 2022, ran Checkov 2.0.930 | the pipeline itself | pin resolved from the newest **tag** |
 | Hadolint skipped because the Checkov step failed before it | the pipeline itself | `if: !cancelled()` — one gate never hides another |
 
-## Artifact governance — JFrog Artifactory (`platform/artifactory`)
+## Artifact governance — JFrog Artifactory (`platform/local/artifactory`)
 
 Self-hosted JFrog Container Registry (JCR) + PostgreSQL, behind an nginx
 proxy. Artifactory is the **single trusted entry point** for images:
@@ -95,7 +110,7 @@ CI ──build, scan, sign──▶ GHCR                Docker Hub
 | Network exposure | every port bound to `127.0.0.1`; PostgreSQL not published at all |
 
 **What testing the controls actually found** (every control is proven with
-real `docker` commands, [`SETUP.md` §6](platform/artifactory/SETUP.md)):
+real `docker` commands, [`SETUP.md` §6](platform/local/artifactory/SETUP.md)):
 
 | Finding | Impact | Fix |
 |---|---|---|
@@ -106,7 +121,7 @@ real `docker` commands, [`SETUP.md` §6](platform/artifactory/SETUP.md)):
 **Edition limit, stated plainly:** JCR (the free edition) exposes the
 repository configuration API but not the user/permission APIs (Pro only), so
 the two identities and their permissions are created in the UI, following
-the exact steps in [`platform/artifactory/SETUP.md`](platform/artifactory/SETUP.md).
+the exact steps in [`platform/local/artifactory/SETUP.md`](platform/local/artifactory/SETUP.md).
 With Artifactory Pro, those would be Terraform (`jfrog/platform` provider).
 
 ## Software supply chain — sign, SBOM, provenance (`.github/workflows/release.yml`)
@@ -153,7 +168,7 @@ deprecated. It is kept deliberately because it is what works through the
 registry proxy today; the switch back to OCI referrers is a one-line change
 (`COSIGN_FORMAT` in the workflow) once the proxy serves them.
 
-## Policy enforcement — kind cluster (`platform/kind`, `platform/k8s`)
+## Policy enforcement — kind cluster (`platform/local/kind`, `deploy/k8s`, `platform/local`)
 
 A local cluster that **only runs what the pipeline signed**. Nodes pull
 exclusively through Artifactory (`registry.local:8085`, read-only
@@ -162,18 +177,18 @@ exclusively through Artifactory (`registry.local:8085`, read-only
 | Layer | Rules | Why this tool |
 |---|---|---|
 | **Pod Security Admission** (`restricted`, enforced) | no privileged, no root, no capabilities, no privilege escalation, seccomp required | built into the API server — nothing to install, bypass or crash |
-| **OPA Gatekeeper** (Rego, [`templates/`](platform/k8s/admission/gatekeeper/templates/)) | registry = Artifactory only (init and ephemeral containers included: `kubectl debug` is no way around it) · digest required · CPU/memory limits · **every namespace must enforce PSA `restricted`** | general-purpose policy; the last rule closes PSA's gap — it only protects namespaces that carry its label |
-| **Kyverno** `ImageValidatingPolicy` ([`verify-signatures.yaml`](platform/k8s/admission/kyverno/verify-signatures.yaml)) | **every** image signed by `release.yml@refs/heads/main` (keyless), signatures fetched through Artifactory | native Cosign keyless verification (Gatekeeper would need an external-data provider for it) |
+| **OPA Gatekeeper** (Rego, [`templates/`](platform/local/admission/gatekeeper/templates/)) | registry = Artifactory only (init and ephemeral containers included: `kubectl debug` is no way around it) · digest required · CPU/memory limits · **every namespace must enforce PSA `restricted`** | general-purpose policy; the last rule closes PSA's gap — it only protects namespaces that carry its label |
+| **Kyverno** `ImageValidatingPolicy` ([`verify-signatures.yaml`](platform/local/admission/kyverno/verify-signatures.yaml)) | **every** image signed by `release.yml@refs/heads/main` (keyless), signatures fetched through Artifactory | native Cosign keyless verification (Gatekeeper would need an external-data provider for it) |
 
-Workload hardening ([`deployment.yaml`](platform/k8s/llm-gateway/deployment.yaml)):
+Workload hardening ([`deployment.yaml`](deploy/k8s/base/deployment.yaml)):
 image by signed digest, UID 10001, read-only root filesystem, all
 capabilities dropped, no service-account token, CPU/memory limits.
-[`networkpolicy.yaml`](platform/k8s/llm-gateway/networkpolicy.yaml): default
+[`networkpolicy.yaml`](deploy/k8s/base/networkpolicy.yaml): default
 deny; only DNS and labelled clients → gateway:8000; **no internet egress for
 the gateway** (an LLM gateway that can reach anywhere is an exfiltration /
 SSRF channel).
 
-**Proven, not assumed** — [`admission_test.py`](platform/k8s/tests/admission_test.py)
+**Proven, not assumed** — [`admission_test.py`](platform/local/tests/admission_test.py)
 sends a compliant pod with exactly one thing broken, through the real
 admission chain (`--dry-run=server`):
 
@@ -192,7 +207,7 @@ admission chain (`--dry-run=server`):
 | Finding | Impact | Fix |
 |---|---|---|
 | Gatekeeper's chart default is `failurePolicy: Ignore` | Gatekeeper down = every pod admitted unchecked | fail closed (`Fail`), Kyverno too |
-| …and fail-closed with the default webhook scope **deadlocked the cluster**: while Gatekeeper started, kube-controller-manager could not renew its Lease (kube-system) → lost leadership → never marked the webhook's own endpoint ready | every write refused, including Helm | webhook never called for system namespaces, and only for pods/namespaces; break-glass procedure in [`SETUP.md`](platform/kind/SETUP.md) |
+| …and fail-closed with the default webhook scope **deadlocked the cluster**: while Gatekeeper started, kube-controller-manager could not renew its Lease (kube-system) → lost leadership → never marked the webhook's own endpoint ready | every write refused, including Helm | webhook never called for system namespaces, and only for pods/namespaces; break-glass procedure in [`SETUP.md`](platform/local/kind/SETUP.md) |
 | Registry config bind-mounted from the repo went stale after a `git switch` (mount keeps the deleted directory) | nodes fell back to HTTPS → `ImagePullBackOff` | config copied into the nodes by `up.sh` |
 | The first test runner counted "webhook unreachable" as a successful denial | 5 false passes | a refusal counts only if the expected control made it |
 
@@ -201,7 +216,7 @@ Gatekeeper, Kyverno) are exempt from admission, so those add-ons pull from
 their upstream registries. In production they would be mirrored through
 Artifactory and pinned by digest too.
 
-## Runtime detection — Falco (`platform/k8s/runtime`)
+## Runtime detection — Falco (`platform/local/runtime`)
 
 Admission control decides what may **start**; Falco watches what a running
 container actually **does** — the only layer that sees an attacker who got
@@ -209,7 +224,7 @@ in through the application itself (RCE, SSRF, a malicious dependency).
 Kernel events via the modern eBPF probe (no kernel module), routed by
 Falcosidekick to a web UI (in production: Slack, PagerDuty or a SIEM).
 
-Rules written for **this** workload ([`falco-values.yaml`](platform/k8s/runtime/falco-values.yaml)),
+Rules written for **this** workload ([`falco-values.yaml`](platform/local/runtime/falco-values.yaml)),
 on top of Falco's default ruleset:
 
 | Rule | Priority | Logic |
@@ -217,7 +232,7 @@ on top of Falco's default ruleset:
 | Unexpected process in LLM gateway | CRITICAL | the image runs one program (uvicorn/python): **any** other process — shell, `curl`, package manager — is an intrusion or an unannounced debug session (MITRE T1059) |
 | LLM gateway outbound connection attempt | WARNING | NetworkPolicy **blocks** internet egress; this **detects the attempt** — an SSRF or a prompt-injected tool call trying to exfiltrate (T1041) |
 
-Proven with real commands ([`SETUP.md` §7](platform/kind/SETUP.md)):
+Proven with real commands ([`SETUP.md` §7](platform/local/kind/SETUP.md)):
 `kubectl exec … sh -c id` → two CRITICAL alerts (`sh`, `id`) with pod,
 namespace, image and command line; a connection to `1.1.1.1:443` →
 refused by the NetworkPolicy **and** reported by Falco.
@@ -232,6 +247,30 @@ policies forbid. `falco` is therefore the single namespace allowed to run
 privileged pods — labelled `enforce: privileged` on purpose, exempt from
 Gatekeeper and Kyverno, with PSA `warn`/`audit` kept at `restricted` so its
 privileged pods stay visible.
+
+## Azure — production-grade landing zone (`infra/terraform`)
+
+```
+Internet ─443─▶ App Gateway WAF_v2 ─80─▶ internal LB ─▶ pods (private AKS, user pool)
+                (OWASP, bots, rate        (node subnet)     │
+                 limit, TLS from KV)                        ├─▶ Key Vault (private endpoint)
+                                                            └─▶ NAT Gateway ─▶ Internet (one fixed IP)
+```
+
+| Layer | Control |
+|---|---|
+| Edge | WAF_v2 in Prevention mode, Microsoft DRS 2.1 + bot rules, 60 req/min per client IP, TLS 1.2+, `Authorization` scrubbed from logs |
+| Network | one subnet per trust zone, NSG with explicit deny-all on each; the only path into the nodes is WAF → ILB:80 |
+| Egress | NAT Gateway: one known IP, no public IP on any node, no default outbound access |
+| Cluster | private API server, no local accounts (Entra ID + Azure RBAC only), etcd encrypted with a rotating CMK, system/user pools, ephemeral OS disks + host encryption, Cilium NetworkPolicies |
+| Governance | Azure Policy (pod security restricted + allowed images regex) in deny mode; audit logs of AKS, Key Vault and WAF to Log Analytics |
+| Terraform | modules + thin environments, remote state per environment (no access keys, versioned, locked), provider checksums locked, fmt/validate/Checkov in CI |
+
+**Proven on Azure** (dev): app reachable only through the WAF (`200`),
+SQL injection and XSS refused (`403`), rate limit enforced, port 80 closed,
+API server with no public FQDN, admin kubeconfig refused, pod egress seen
+from the outside as the NAT IP. Six issues found by deploying for real are
+listed in [`infra/terraform/README.md`](infra/terraform/README.md).
 
 ## Quick start
 

@@ -1,5 +1,6 @@
 # Toolchain for the whole project — `brew bundle` installs what is missing.
 tap "hashicorp/tap"
+tap "azure/kubelogin"
 
 # IaC
 brew "hashicorp/tap/terraform"
@@ -8,6 +9,7 @@ brew "checkov"           # IaC scanning (Terraform, Kubernetes, Dockerfile)
 # Cloud, Git & Kubernetes
 brew "gh"
 cask "azure-cli"
+brew "azure/kubelogin/kubelogin" # kubectl sign-in through Entra ID (AKS without local accounts)
 brew "kubernetes-cli"    # kubectl
 brew "helm"
 brew "kind"

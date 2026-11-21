@@ -1,0 +1,23 @@
+# local: kind cluster, images pulled ONLY through Artifactory
+# (platform/local/kind). Same digest as the base — the copy served by the
+# ghcr-remote proxy, signature verified at admission by Kyverno.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - networkpolicy-clients.yaml
+
+images:
+  - name: ghcr.io/kmdiallo69/llm-gateway
+    newName: registry.local:8085/docker/kmdiallo69/llm-gateway
+
+patches:
+  # Read-only Artifactory identity (cluster-reader), created by up.sh.
+  - target:
+      kind: Deployment
+      name: llm-gateway
+    patch: |-
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: artifactory-pull
