@@ -56,19 +56,27 @@ terraform apply tfplan
 
 About 25 minutes (App Gateway and AKS are the long ones).
 
-## 3. Deploy the app
-
-The cluster is private: kubectl runs through Azure Resource Manager.
+The LLM API key is passed from the keychain, never written to a file:
 
 ```bash
-RG=$(terraform output -raw resource_group); AKS=$(terraform output -raw aks_name)
-kubectl kustomize ../../../../deploy/k8s/overlays/dev > /tmp/dev.yaml
-az aks command invoke -g $RG -n $AKS --file /tmp/dev.yaml \
-  --command "kubectl apply -f dev.yaml && kubectl -n llm-gateway rollout status deploy/llm-gateway"
+TF_VAR_llm_api_key="$(security find-generic-password -s llm-api-key-dev -w)" terraform plan -out=tfplan
+TF_VAR_llm_api_key="$(security find-generic-password -s llm-api-key-dev -w)" terraform apply tfplan
 ```
 
-The overlay's ILB IP and WAF subnet must match `terraform output
-ingress_ilb_ip` / `appgw_cidr` (both derived from the environment's /16).
+It is a write-only value: it reaches Key Vault, never the plan or the
+state. To rotate: new value + `-var llm_api_key_version=<n+1>`.
+
+## 3. Deploy the app
+
+```bash
+scripts/deploy-aks.sh dev    # from the repository root
+```
+
+Renders `deploy/k8s/overlays/dev`, injects the three non-secret IDs that
+change per deployment (Workload Identity client ID, vault name, tenant) and
+applies it through `az aks command invoke` — the API server is private.
+The overlay's ILB IP and WAF subnet match `ingress_ilb_ip` / `appgw_cidr`
+(both derived from the environment's /16).
 
 ## 4. Destroy
 

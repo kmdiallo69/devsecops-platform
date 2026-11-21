@@ -28,3 +28,6 @@ sbom*.json
 
 # macOS
 .DS_Store
+
+# Temporary render dirs (scripts/deploy-aks.sh)
+deploy/k8s/.render.*
