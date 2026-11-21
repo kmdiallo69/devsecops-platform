@@ -72,9 +72,20 @@ ingress_ilb_ip` / `appgw_cidr` (both derived from the environment's /16).
 
 ## 4. Destroy
 
+Remove the workloads FIRST, then the infrastructure:
+
 ```bash
+az aks command invoke -g $RG -n $AKS --command "kubectl delete namespace llm-gateway --wait=true"
 terraform destroy
 ```
+
+Why: draining the user pool moves the app pods — and in dev there is
+nowhere to move them (one user node; the system pool is tainted
+`CriticalAddonsOnly`). The PodDisruptionBudget (`minAvailable: 1`) then
+correctly refuses the second eviction and the pool deletion blocks for 30
+minutes. Same root cause as an upgrade without surge capacity: a PDB needs
+somewhere to reschedule to. If it happens anyway:
+`az aks nodepool delete --ignore-pdb` (Azure API, not Kubernetes RBAC).
 
 The vault stays soft-deleted for its retention period (purge protection);
 the next deployment gets a new name from the random suffix.
@@ -89,3 +100,5 @@ the next deployment gets a new name from the random suffix.
 | Azure CNI **overlay** keeps pod IPs between nodes: the nodes NSG's deny-all dropped cross-node DNS | pod CIDR allowed in the nodes NSG |
 | The Azure *restricted* initiative is stricter than Kubernetes PSA *restricted*: requires `fsGroup` and `supplementalGroups` | added to the base Deployment |
 | Default ephemeral OS disk (128 GB) larger than the VM's local NVMe (110 GiB) | `os_disk_size_gb = 64` |
+| **Teardown**: the PDB blocked the user-pool drain (one user node, nowhere to reschedule) — and the admin role assignment was destroyed in parallel, so `kubectl` was refused while the pool hung | runbook: delete workloads first; node pool now `depends_on` the admin role (access kept until the pool is gone); `--ignore-pdb` via the Azure API as last resort |
+| A 40-minute destroy outlived the interactive CLI token (`ExpiredAuthenticationToken`) | re-run (state was consistent, locked meanwhile); CI uses OIDC federation, refreshed by the provider |
