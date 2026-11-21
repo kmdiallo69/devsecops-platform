@@ -103,6 +103,10 @@ resource "azurerm_storage_account" "state" {
 }
 
 resource "azurerm_storage_container" "tfstate" {
+  # Read logging IS enabled — azurerm_monitor_diagnostic_setting.state_blob
+  # below (StorageRead/Write/Delete). This check only recognises the legacy
+  # azurerm_log_analytics_storage_insights mechanism.
+  #checkov:skip=CKV2_AZURE_21:blob read logging implemented with a diagnostic setting (state_blob); the check only recognises legacy storage insights
   name                  = "tfstate"
   storage_account_id    = azurerm_storage_account.state.id
   container_access_type = "private"
