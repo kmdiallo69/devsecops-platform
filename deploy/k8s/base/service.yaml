@@ -1,0 +1,14 @@
+# In-cluster only. AKS overlays turn it into an INTERNAL load balancer at a
+# fixed IP behind the WAF; it is never given a public IP.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-gateway
+  namespace: llm-gateway
+spec:
+  selector:
+    app: llm-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

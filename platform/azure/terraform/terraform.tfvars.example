@@ -1,3 +1,0 @@
-# Copy to terraform.tfvars (git-ignored) and fill in.
-subscription_id = ""
-admin_ip        = "" # your public IPv4: curl -s https://api.ipify.org

@@ -1,0 +1,35 @@
+# Zero trust inside the namespace: nothing talks to anything unless a policy
+# allows it. The base allows DNS only; each overlay adds the ONE ingress
+# path of its environment (labelled clients locally, the WAF subnet on AKS).
+# The gateway itself has no internet egress anywhere: an LLM gateway that
+# can reach anywhere is an exfiltration / SSRF channel.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: llm-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: llm-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

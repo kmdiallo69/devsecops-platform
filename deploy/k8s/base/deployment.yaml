@@ -1,0 +1,83 @@
+# The workload contract, identical in every environment: overlays may change
+# the image source, the replica count and the ingress path — never the
+# security context.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-gateway
+  namespace: llm-gateway
+  labels:
+    app: llm-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: llm-gateway
+  template:
+    metadata:
+      labels:
+        app: llm-gateway
+    spec:
+      # The app never calls the Kubernetes API: no token mounted to steal.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Required by the Azure "restricted" initiative (stricter than
+        # Kubernetes PSA restricted): every group the pod runs with is pinned.
+        fsGroup: 10001
+        supplementalGroups: [10001]
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: llm-gateway
+      containers:
+        - name: llm-gateway
+          # The signed release (Step 4), BY DIGEST — never a tag. Overlays
+          # pin their own digest: promoting a release to an environment is a
+          # reviewed PR that changes one line.
+          image: ghcr.io/kmdiallo69/llm-gateway@sha256:4dd9c65004878665eed59d8bb36ab792940dc4540f3206a2912a01e31d84a820
+          # Every pod start re-authenticates to the registry: a revoked pull
+          # credential takes effect immediately, even for a cached image.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: LLM_PROVIDER
+              value: mock
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Read-only root filesystem: the only writable place, small and
+        # wiped on restart.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

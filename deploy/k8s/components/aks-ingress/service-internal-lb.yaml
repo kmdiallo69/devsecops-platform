@@ -1,0 +1,17 @@
+# INTERNAL load balancer in the node subnet, at the IP the Application
+# Gateway's backend pool points to (Terraform output `ingress_ilb_ip`).
+# No public IP: nsg-aks-nodes only lets the WAF subnet reach it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-gateway
+  namespace: llm-gateway
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    service.beta.kubernetes.io/azure-load-balancer-internal-subnet: snet-aks-nodes
+    service.beta.kubernetes.io/azure-load-balancer-ipv4: SET-BY-OVERLAY
+spec:
+  type: LoadBalancer
+  # Local: no extra SNAT hop, the pod sees the gateway instance's IP — which
+  # is what the NetworkPolicy allows.
+  externalTrafficPolicy: Local
