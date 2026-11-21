@@ -98,7 +98,6 @@ resource "azurerm_storage_account" "state" {
   #checkov:skip=CKV2_AZURE_1:CMK on the state account needs a pre-existing management vault (production next step)
   #checkov:skip=CKV_AZURE_33:queue service not used (blob only)
   #checkov:skip=CKV2_AZURE_41:SAS disabled entirely (shared_access_key_enabled = false)
-  #checkov:skip=CKV2_AZURE_21:blob read logging = production next step (diagnostic setting to the management workspace)
 
   tags = azurerm_resource_group.state.tags
 }
@@ -124,4 +123,33 @@ resource "azurerm_management_lock" "state" {
   scope      = azurerm_storage_account.state.id
   lock_level = "CanNotDelete"
   notes      = "Holds the Terraform state of every environment."
+}
+
+# Who read or wrote the state, and when: every blob read/write/delete on the
+# state account goes to a dedicated workspace (separate from the
+# environments, so destroying an environment never erases this trail).
+resource "azurerm_log_analytics_workspace" "state_audit" {
+  name                         = "log-llmgw-tfstate-frc"
+  location                     = azurerm_resource_group.state.location
+  resource_group_name          = azurerm_resource_group.state.name
+  sku                          = "PerGB2018"
+  retention_in_days            = 90
+  local_authentication_enabled = false
+  tags                         = azurerm_resource_group.state.tags
+}
+
+resource "azurerm_monitor_diagnostic_setting" "state_blob" {
+  name                       = "state-access-audit"
+  target_resource_id         = "${azurerm_storage_account.state.id}/blobServices/default"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.state_audit.id
+
+  enabled_log {
+    category = "StorageRead"
+  }
+  enabled_log {
+    category = "StorageWrite"
+  }
+  enabled_log {
+    category = "StorageDelete"
+  }
 }
