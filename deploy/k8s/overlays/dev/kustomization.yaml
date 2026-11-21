@@ -11,7 +11,7 @@ components:
 # Promotion = a reviewed PR changing this digest — nothing else moves.
 images:
   - name: ghcr.io/kmdiallo69/llm-gateway
-    digest: sha256:4dd9c65004878665eed59d8bb36ab792940dc4540f3206a2912a01e31d84a820
+    digest: sha256:bbb2d5884266ba1006b02c6dbc2dc5b9c2687c353dff56cce1a8405c90792deb
 
 replicas:
   - name: llm-gateway
