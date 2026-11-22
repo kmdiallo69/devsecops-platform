@@ -3,6 +3,7 @@
 ```
 infra/terraform/
   bootstrap/            remote state store (run once)
+  subscription/         Defender for Cloud plans + security contact (once per subscription)
   modules/
     platform/           composition: wires the modules below into one environment
     network/            VNet, 3 subnets, NSG per subnet, NAT Gateway, private DNS
@@ -23,6 +24,7 @@ composition module; only sizing and exposure differ:
 | VNet | 10.10.0.0/16 | 10.20.0.0/16 | 10.30.0.0/16 |
 | AKS tier | Free | Standard (SLA) | Standard (SLA) |
 | System / user nodes | 1 / 1, no zones | 2 / 2, zones 1-3 | 3 / 3, zones 1-3 |
+| System node size | D2 (2 vCPU) | D4 (4 vCPU) | D4 (4 vCPU) |
 | WAF exposure | operator IP | operator / corporate IPs | Internet |
 | Key Vault | standard, 7-day soft delete | standard, 30 days | **premium (HSM keys)**, 90 days |
 | Logs | 30 days, 0.5 GB/day cap | 30 days, 5 GB/day | 90 days, no cap |
@@ -43,6 +45,29 @@ terraform apply
 Storage account with **no access keys** (Entra ID only), reachable from
 the operator IP only, GZRS, blob versioning, 30-day soft delete, and a
 `CanNotDelete` lock. Its own state is local (git-ignored).
+
+## 1b. Subscription security baseline (once per subscription)
+
+```bash
+cd infra/terraform/subscription
+cp terraform.tfvars.example terraform.tfvars   # subscription_id, security_contact_email
+terraform init -backend-config="storage_account_name=$(terraform -chdir=../bootstrap output -raw storage_account_name)"
+terraform apply
+```
+
+Defender for Cloud plans are **subscription-wide**, so they live in their
+own root and state, not in an environment: destroying dev must not switch
+off threat protection for staging and prod.
+
+| Plan | What it gives |
+|---|---|
+| Defender CSPM | posture recommendations, attack paths, agentless scanning |
+| Defender for Containers | runtime sensor on AKS nodes, agentless K8s discovery, registry vulnerability assessment |
+| Key Vault | anomalous access alerts (unusual IP, volume, enumeration) |
+
+The AKS module declares the sensor (`microsoft_defender` block) explicitly:
+with the Containers plan on, Azure would add it by itself and every plan
+would show drift. `enable_defender = false` returns all plans to Free.
 
 ## 2. Deploy an environment
 
@@ -78,6 +103,28 @@ applies it through `az aks command invoke` — the API server is private.
 The overlay's ILB IP and WAF subnet match `ingress_ilb_ip` / `appgw_cidr`
 (both derived from the environment's /16).
 
+### Verify runtime detection
+
+Admission control first — a root pod with a non-allowed image is refused
+(Azure Policy: image not allowed, no `runAsNonRoot`, no `fsGroup`, no seccomp):
+
+```bash
+$KUBECTL "kubectl create ns defender-test; kubectl run t -n defender-test --image=mcr.microsoft.com/aks/fundamental/base-ubuntu:v0.0.11 -- sleep 600; kubectl delete ns defender-test"
+```
+
+Then Microsoft's simulated alert, in a namespace **excluded** from the
+policies (system components need privileges there):
+
+```bash
+$KUBECTL "kubectl run defender-test -n kube-system --image=mcr.microsoft.com/aks/fundamental/base-ubuntu:v0.0.11 --restart=Never -- sleep 600 && kubectl wait -n kube-system --for=condition=Ready pod/defender-test --timeout=120s && kubectl exec -n kube-system defender-test -- bash -c 'cp /bin/echo ./asc_alerttest_662jfi039n; ./asc_alerttest_662jfi039n testing eicar pipe'; kubectl delete pod -n kube-system defender-test --wait=false"
+az security alert list --query "[?contains(alertDisplayName,'test')]" -o table   # 10-30 min later
+```
+
+`$KUBECTL` is the environment's `kubectl` output. The point of the pair:
+admission control has blind spots (excluded namespaces); runtime detection
+sees process behaviour regardless of namespace. Prevention and detection
+are layers, not alternatives.
+
 ## 4. Destroy
 
 Remove the workloads FIRST, then the infrastructure:
@@ -109,4 +156,5 @@ the next deployment gets a new name from the random suffix.
 | The Azure *restricted* initiative is stricter than Kubernetes PSA *restricted*: requires `fsGroup` and `supplementalGroups` | added to the base Deployment |
 | Default ephemeral OS disk (128 GB) larger than the VM's local NVMe (110 GiB) | `os_disk_size_gb = 64` |
 | **Teardown**: the PDB blocked the user-pool drain (one user node, nowhere to reschedule) — and the admin role assignment was destroyed in parallel, so `kubectl` was refused while the pool hung | runbook: delete workloads first; node pool now `depends_on` the admin role (access kept until the pool is gone); `--ignore-pdb` via the Azure API as last resort |
+| Defender sensor: the collector DaemonSet pod stayed `Pending` on the dev **system node** — AKS add-ons already request 1881m of its 1900m allocatable CPU, so the node ran with **no runtime detection** | dev accepted and documented (4-vCPU trial quota); staging system pool raised to D4 (prod already D4). Check `kubectl get ds -n kube-system` after enabling the sensor: DESIRED must equal READY |
 | A 40-minute destroy outlived the interactive CLI token (`ExpiredAuthenticationToken`) | re-run (state was consistent, locked meanwhile); CI uses OIDC federation, refreshed by the provider |
