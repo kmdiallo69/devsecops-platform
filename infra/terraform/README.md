@@ -113,10 +113,11 @@ $KUBECTL "kubectl create ns defender-test; kubectl run t -n defender-test --imag
 ```
 
 Then Microsoft's simulated alert, in a namespace **excluded** from the
-policies (system components need privileges there):
+policies (`aks-command`, not `kube-system`: activity in system namespaces
+did not produce the test alert):
 
 ```bash
-$KUBECTL "kubectl run defender-test -n kube-system --image=mcr.microsoft.com/aks/fundamental/base-ubuntu:v0.0.11 --restart=Never -- sleep 600 && kubectl wait -n kube-system --for=condition=Ready pod/defender-test --timeout=120s && kubectl exec -n kube-system defender-test -- bash -c 'cp /bin/echo ./asc_alerttest_662jfi039n; ./asc_alerttest_662jfi039n testing eicar pipe'; kubectl delete pod -n kube-system defender-test --wait=false"
+$KUBECTL "kubectl run defender-test -n aks-command --image=mcr.microsoft.com/aks/fundamental/base-ubuntu:v0.0.11 --restart=Never -- sleep 600 && kubectl wait -n aks-command --for=condition=Ready pod/defender-test --timeout=120s && kubectl exec -n aks-command defender-test -- bash -c 'cp /bin/echo ./asc_alerttest_662jfi039n; ./asc_alerttest_662jfi039n testing eicar pipe'; kubectl delete pod -n aks-command defender-test --wait=false"
 az security alert list --query "[?contains(alertDisplayName,'test')]" -o table   # 10-30 min later
 ```
 
@@ -157,4 +158,5 @@ the next deployment gets a new name from the random suffix.
 | Default ephemeral OS disk (128 GB) larger than the VM's local NVMe (110 GiB) | `os_disk_size_gb = 64` |
 | **Teardown**: the PDB blocked the user-pool drain (one user node, nowhere to reschedule) — and the admin role assignment was destroyed in parallel, so `kubectl` was refused while the pool hung | runbook: delete workloads first; node pool now `depends_on` the admin role (access kept until the pool is gone); `--ignore-pdb` via the Azure API as last resort |
 | Defender sensor: the collector DaemonSet pod stayed `Pending` on the dev **system node** — AKS add-ons already request 1881m of its 1900m allocatable CPU, so the node ran with **no runtime detection** | dev accepted and documented (4-vCPU trial quota); staging system pool raised to D4 (prod already D4). Check `kubectl get ds -n kube-system` after enabling the sensor: DESIRED must equal READY |
+| Simulated Defender alert run in `kube-system`: no alert after 3 h, while the sensor reported healthy (heartbeats, no errors) | runbook uses a non-system namespace (`aks-command`); a quiet sensor is not proof of coverage — test detection end to end, don't trust a green DaemonSet |
 | A 40-minute destroy outlived the interactive CLI token (`ExpiredAuthenticationToken`) | re-run (state was consistent, locked meanwhile); CI uses OIDC federation, refreshed by the provider |

@@ -38,7 +38,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 6 | Runtime protection: Falco rules + alert | Runtime threat detection | ✅ |
 | 7 | Azure with Terraform (modules + dev/staging/prod): private AKS, WAF_v2, NAT Gateway, NSGs, Key Vault CMK + private endpoint, Azure Policy, remote state | Governed cloud foundation, key management | ✅ |
 | 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity, write-only Terraform secret, rotation without restart | No secret in Git, images, state, env vars or Kubernetes Secrets | ✅ |
-| 9 | Defender for Cloud: CSPM, Defender for Containers, DevOps security (GitHub connector) | CSPM/CWPP + pipeline telemetry | ⏳ |
+| 9 | Defender for Cloud: CSPM, Defender for Containers (AKS sensor), Key Vault threat protection, security contact — subscription root of its own | CSPM/CWPP, defense in depth (admission + runtime) | ✅ |
 | 10 | AI/LLM security: guardrails mapped to the OWASP LLM Top 10 (prompt injection, output handling, PII, rate limits) + tests | Securing AI/LLM platforms | ⏳ |
 | 11 | Threat model (STRIDE) + architecture docs | Secure design | ⏳ |
 
