@@ -90,3 +90,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "defender_sensor_enabled" {
+  description = "Deploy the Defender for Containers sensor (needs the subscription's Containers plan)."
+  type        = bool
+  default     = true
+}

@@ -199,7 +199,7 @@ jobs:
       # Providers come from each root's lock file (checksums verified).
       - name: terraform validate
         run: |
-          for root in infra/terraform/bootstrap infra/terraform/environments/*/; do
+          for root in infra/terraform/bootstrap infra/terraform/subscription infra/terraform/environments/*/; do
             echo "::group::$root"
             terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly
             terraform -chdir="$root" validate

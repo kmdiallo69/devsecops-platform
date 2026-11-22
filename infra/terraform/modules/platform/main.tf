@@ -101,6 +101,7 @@ module "aks" {
   log_analytics_workspace_id = module.monitoring.log_analytics_workspace_id
   system_pool                = var.system_pool
   user_pool                  = var.user_pool
+  defender_sensor_enabled    = var.defender_sensor_enabled
   tags                       = local.tags
 }
 

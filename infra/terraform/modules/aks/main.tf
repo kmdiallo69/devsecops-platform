@@ -114,6 +114,17 @@ resource "azurerm_kubernetes_cluster" "this" {
     msi_auth_for_monitoring_enabled = true
   }
 
+  # Defender for Containers sensor (runtime threat detection), reporting to
+  # the environment's workspace. Declared explicitly: with the subscription
+  # plan on (infra/terraform/subscription), Azure would otherwise add it by
+  # itself and every plan would show drift.
+  dynamic "microsoft_defender" {
+    for_each = var.defender_sensor_enabled ? [1] : []
+    content {
+      log_analytics_workspace_id = var.log_analytics_workspace_id
+    }
+  }
+
   automatic_upgrade_channel = "patch"
   node_os_upgrade_channel   = "NodeImage"
 
