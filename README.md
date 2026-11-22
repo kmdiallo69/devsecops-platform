@@ -27,6 +27,10 @@ never by code. Promoting a release = a PR changing one digest in an overlay.
 
 Each step is one commit (or a small series), tested for real before moving on.
 
+![Architecture: from commit to runtime](docs/architecture/architecture.png)
+
+*Diagram as code: [docs/architecture/architecture.py](docs/architecture/architecture.py). Threat model: [docs/threat-model.md](docs/threat-model.md).*
+
 | # | Step | What it proves | Status |
 |---|------|----------------|--------|
 | 0 | Bootstrap: toolchain, repo hygiene, pre-commit secret scanning | Shift-left: secrets never reach Git | ✅ |

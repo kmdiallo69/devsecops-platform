@@ -29,3 +29,4 @@ brew "jfrog-cli"         # `jf` — Artifactory
 brew "gitleaks"          # secret detection
 brew "semgrep"           # SAST
 brew "pre-commit"
+brew "graphviz"          # renders docs/architecture (diagrams as code)
