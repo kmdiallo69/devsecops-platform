@@ -13,8 +13,9 @@ module "platform" {
 
   kubernetes_version = "1.36"
   aks_sku_tier       = "Standard"
-  system_pool        = { vm_size = "Standard_D2ads_v7", node_count = 2, zones = ["1", "2", "3"] }
-  user_pool          = { vm_size = "Standard_D4ads_v7", node_count = 2, zones = ["1", "2", "3"] }
+  # D4 system nodes: AKS add-ons fill a D2, leaving no room for the Defender sensor.
+  system_pool = { vm_size = "Standard_D4ads_v7", node_count = 2, zones = ["1", "2", "3"] }
+  user_pool   = { vm_size = "Standard_D4ads_v7", node_count = 2, zones = ["1", "2", "3"] }
 
   key_vault_sku              = "standard"
   key_vault_soft_delete_days = 30
