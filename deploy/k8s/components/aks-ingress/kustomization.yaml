@@ -8,3 +8,17 @@ resources:
   - networkpolicy-from-waf.yaml
 patches:
   - path: service-internal-lb.yaml
+  # Pods are reachable only from the WAF subnet (networkpolicy-from-waf.yaml),
+  # so the last X-Forwarded-For entry is the WAF's view of the client: safe
+  # as the app's rate-limit key. Without it every caller would share the
+  # WAF's IP — one bucket for everyone. Inline JSON patch: a partial
+  # Deployment file would be scanned by Checkov as a full, unhardened one.
+  - target:
+      kind: Deployment
+      name: llm-gateway
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: TRUST_FORWARDED_FOR
+          value: "true"

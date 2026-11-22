@@ -30,3 +30,6 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     model: str
+    # True when a guardrail changed the exchange (redaction, stripped markup,
+    # withheld reply): the client knows the text is not the raw model output.
+    filtered: bool = False
