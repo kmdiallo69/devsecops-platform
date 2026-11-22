@@ -39,7 +39,7 @@ Each step is one commit (or a small series), tested for real before moving on.
 | 7 | Azure with Terraform (modules + dev/staging/prod): private AKS, WAF_v2, NAT Gateway, NSGs, Key Vault CMK + private endpoint, Azure Policy, remote state | Governed cloud foundation, key management | ✅ |
 | 8 | Secrets: Key Vault → Secrets Store CSI driver via Workload Identity, write-only Terraform secret, rotation without restart | No secret in Git, images, state, env vars or Kubernetes Secrets | ✅ |
 | 9 | Defender for Cloud: CSPM, Defender for Containers (AKS sensor), Key Vault threat protection, security contact — subscription root of its own | CSPM/CWPP, defense in depth (admission + runtime) | ✅ |
-| 10 | AI/LLM security: guardrails mapped to the OWASP LLM Top 10 (prompt injection, output handling, PII, rate limits) + tests | Securing AI/LLM platforms | ⏳ |
+| 10 | AI/LLM security: guardrails mapped to the OWASP LLM Top 10 (prompt injection, output handling, PII, rate limits) + tests | Securing AI/LLM platforms | ✅ |
 | 11 | Threat model (STRIDE) + architecture docs | Secure design | ⏳ |
 
 ## LLM gateway (`apps/llm-gateway`)
@@ -56,6 +56,28 @@ defaults to an offline mock so tests and CI need no model and no key.
 | API docs off by default | No free map of the attack surface |
 | Every dependency pinned **and hashed**, locked for Linux/py3.12 | A substituted package fails the build |
 | Multi-stage image, numeric non-root UID, pip removed | Smaller attack surface; works with `runAsNonRoot` |
+
+### Guardrails — OWASP Top 10 for LLM Applications (2025)
+
+Request path: rate limit → schema → injection check → input redaction →
+model → canary check → output redaction and markup stripping
+(`app/guardrails.py`, tests in `tests/test_guardrails.py`, written as attacks).
+
+| OWASP | Risk | Control in this platform |
+|---|---|---|
+| LLM01 | Prompt injection | No caller `system` role; known override phrasings and chat-template tokens refused (400). Heuristic by nature — the structural controls below limit what a successful injection can do |
+| LLM02 | Sensitive information disclosure | Emails, cards (Luhn-checked), IBANs, phones, cloud keys, tokens and JWTs redacted **before** the provider sees them, and again on the reply |
+| LLM03 | Supply chain | Hashed lockfiles, SCA gate, signed images with SBOM and provenance, admission-time signature check (steps 2-5) |
+| LLM04 | Data and model poisoning | No training or fine-tuning here; models come from a governed source (Artifactory remote, step 3) |
+| LLM05 | Improper output handling | Reply treated as untrusted data: markdown images (zero-click exfiltration) and active HTML removed; returned as JSON, never executed |
+| LLM06 | Excessive agency | The model has no tools, no credentials, no network path of its own — it can only return text |
+| LLM07 | System prompt leakage | Random per-process **canary** appended to the system prompt; a reply containing it is withheld. The system prompt holds no secrets anyway |
+| LLM08 | Vector and embedding weaknesses | No RAG store yet; when added: per-tenant indexes, access checks at retrieval time |
+| LLM09 | Misinformation | Out of scope for a gateway; `filtered: true` tells clients when the text is not the raw model output |
+| LLM10 | Unbounded consumption | Size caps (422), per-client sliding-window limit (429 + `Retry-After`) behind the WAF rate-limit rule; `X-Forwarded-For` honoured only behind a trusted proxy |
+
+Every guardrail decision is an audit log line with the control, the
+pattern or data types and the client — never the user's text.
 
 ```bash
 cd apps/llm-gateway

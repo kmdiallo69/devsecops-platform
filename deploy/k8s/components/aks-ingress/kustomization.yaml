@@ -8,3 +8,4 @@ resources:
   - networkpolicy-from-waf.yaml
 patches:
   - path: service-internal-lb.yaml
+  - path: deployment-trust-waf.yaml

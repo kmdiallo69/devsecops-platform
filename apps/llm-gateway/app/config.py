@@ -44,6 +44,13 @@ class Settings:
         )
     )
 
+    # Guardrails (guardrails.py). Requests per client per minute, per pod.
+    rate_limit_per_minute: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_PER_MINUTE", "30")))
+    # Behind the App Gateway, the client IP is the LAST X-Forwarded-For entry
+    # (appended by the WAF). Only trust it when a proxy we control sets it —
+    # otherwise any caller could pick its own rate-limit bucket.
+    trust_forwarded_for: bool = field(default_factory=lambda: _bool("TRUST_FORWARDED_FOR", False))
+
     # Interactive API docs expose the full attack surface to anyone who can
     # reach the service: off unless explicitly enabled (local dev only).
     enable_docs: bool = field(default_factory=lambda: _bool("ENABLE_DOCS", False))
