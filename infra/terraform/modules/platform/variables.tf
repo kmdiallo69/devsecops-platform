@@ -133,3 +133,9 @@ variable "llm_api_key_version" {
   type        = number
   default     = 1
 }
+
+variable "defender_sensor_enabled" {
+  description = "Defender for Containers sensor on AKS (subscription plan in infra/terraform/subscription)."
+  type        = bool
+  default     = true
+}
