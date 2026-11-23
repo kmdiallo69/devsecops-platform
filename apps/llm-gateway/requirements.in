@@ -7,6 +7,6 @@
 # uvicorn WITHOUT [standard]: the extras (uvloop, httptools, watchfiles,
 # websockets...) are not needed here — every package left out is one less
 # thing to patch.
-fastapi==0.163.1
+fastapi==0.165.0
 uvicorn==0.54.0
 httpx==0.28.1
